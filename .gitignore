@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Model weights / large artifacts
+*.safetensors
+*.tsra
+*.gguf
+*.bin
+*.pt
+*.npz
+models/
+checkpoints/
+
+# Data / eval outputs
+compiler/calib/data/
+*.parquet
+eval/results/
+eval/figures/*.png
+eval/figures/*.svg
+
+# Node / dashboard
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# Firmware build artifacts
+firmware/build/
+firmware/.pio/
+
+# Secrets
+*.pem
+*.key
+.env
+secrets.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
