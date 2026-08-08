@@ -106,7 +106,9 @@ def load_wikitext2_eval(tokenizer, seq_len: int = CALIB_SEQ_LEN, n_chunks: int =
     chunks into non-overlapping `seq_len` windows — the standard GPTQ/AWQ-style convention."""
     from datasets import load_dataset
 
-    ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    # "wikitext" (unnamespaced, script-based) is deprecated on the Hub; Salesforce/wikitext is
+    # the current canonical rehost of the same data under the same config names.
+    ds = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")
     text = "\n\n".join(t for t in ds["text"] if t.strip())
     ids = tokenizer(text, return_tensors="pt")["input_ids"][0]
 
