@@ -33,9 +33,9 @@ class EvalResult:
 
 
 def evaluate_wikitext_ppl(model, tokenizer, n_samples: int = 128, seq_len: int = 2048) -> float:
-    from compiler.calib import load_calibration_set, perplexity
+    from compiler.calib import load_wikitext2_eval, perplexity
 
-    calib = load_calibration_set("chat", tokenizer, n_samples=n_samples, seq_len=seq_len)
+    calib = load_wikitext2_eval(tokenizer, seq_len=seq_len, n_chunks=n_samples)
     return perplexity(model, calib)
 
 

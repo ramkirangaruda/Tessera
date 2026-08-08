@@ -97,6 +97,27 @@ def load_calibration_set(domain: str, tokenizer, n_samples: int = N_CALIB_SAMPLE
     return samples
 
 
+def load_wikitext2_eval(tokenizer, seq_len: int = CALIB_SEQ_LEN, n_chunks: int = N_CALIB_SAMPLES):
+    """Dedicated WikiText-2 perplexity eval set (spec §4.1 M0 acceptance metric) — deliberately
+    separate from `load_calibration_set`, since the spec's own domain table distinguishes
+    calibration *source* (what gets fake-quantized against) from eval *metric* (the held-out
+    benchmark quality is measured on): the `chat` domain calibrates on OpenAssistant but is
+    scored on WikiText-2 ppl, not on OpenAssistant ppl. Concatenates the raw test split and
+    chunks into non-overlapping `seq_len` windows — the standard GPTQ/AWQ-style convention."""
+    from datasets import load_dataset
+
+    ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    text = "\n\n".join(t for t in ds["text"] if t.strip())
+    ids = tokenizer(text, return_tensors="pt")["input_ids"][0]
+
+    chunks = []
+    for start in range(0, ids.shape[0] - seq_len, seq_len):
+        chunks.append(ids[start : start + seq_len].unsqueeze(0))
+        if len(chunks) >= n_chunks:
+            break
+    return chunks
+
+
 def perplexity(model, calib_samples) -> float:
     import math
 
