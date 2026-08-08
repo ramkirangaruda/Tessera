@@ -16,14 +16,16 @@ artifact that every device reads at whatever precision it can afford. A session 
 summary + embeddings, never a raw KV cache) travels on a USB dongle and resumes on a different
 device, at a different precision, even on a different model size.
 
-Model family: Qwen2.5 (1.5B-Instruct laptop/Pi5, 0.5B-Instruct Pi Zero 2W). See `docs/spec.md` §3.
+Model family: Qwen3 dense (1.7B laptop/Pi5, 0.6B Pi Zero 2W), amended from an initial Qwen2.5
+choice — see `docs/spec.md` §2/§3 for the full rationale and the config-derived numbers behind
+it. Qwen2.5-1.5B/-0.5B run as a secondary validation tier (§13 cross-model replication).
 
 ## Repo layout
 
 ```
 compiler/   sensitivity sweep + Lagrangian bit allocator (offline, produces manifests)
 format/     nested bit-plane weight format (.tsra) — pack / mmap load / round-trip test
-runtime/    manifest-driven Qwen2.5 loader + generation
+runtime/    manifest-driven Qwen3 loader + generation
 daemon/     host daemon — USB link, handshake protocol, crypto, FastAPI/websocket server
 firmware/   RP2040/ESP32-S3 dongle firmware (TinyUSB composite, OLED, LED, write-protect)
 dashboard/  React + Vite live dashboard (memory bar, allocation heatmap, Pareto plot)
@@ -61,8 +63,8 @@ python -m pytest compiler/test_allocate.py -v
 ```
 
 Everything else (`compiler/sweep.py`, `runtime/`, `daemon/`, `firmware/`) needs the actual
-Qwen2.5-1.5B-Instruct weights and, for the sweep, a GPU — see inline docstrings for how to point
-them at a local checkout of the model.
+Qwen3-1.7B weights and, for the sweep, a GPU — see inline docstrings for how to point them at a
+local checkout of the model.
 
 ## Team
 

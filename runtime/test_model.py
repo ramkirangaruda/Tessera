@@ -1,12 +1,13 @@
-"""Unit tests for the .tsra <-> HF Qwen2 name mapping — pure string logic, no torch/transformers
-or model download required. The materialization path (from_manifest, drop_to_bits) needs torch +
-transformers + a real config.json and is not exercised here.
+"""Unit tests for the .tsra <-> HF Qwen3/Qwen2 name mapping — pure string logic, no
+torch/transformers or model download required. The materialization path (from_manifest,
+drop_to_bits, pack_from_pretrained) needs torch + transformers + a real config.json and is not
+exercised here.
 """
 from __future__ import annotations
 
 import pytest
 
-from runtime.model import tsra_name_to_hf_name
+from runtime.model import _GLOBAL_MAP, _PER_LAYER_MAP, hf_name_to_tsra_name, tsra_name_to_hf_name
 
 
 def test_global_tensors():
@@ -39,3 +40,25 @@ def test_all_197_quantizable_names_resolve():
     for name in quantizable_tensor_names():
         # should not raise
         tsra_name_to_hf_name(name)
+
+
+def test_qwen3_only_tensors():
+    """q_norm/k_norm (spec §2 amendment) — Qwen3 has these, Qwen2.5 doesn't."""
+    assert tsra_name_to_hf_name("blk.0.attn_q_norm.weight") == "model.layers.0.self_attn.q_norm.weight"
+    assert tsra_name_to_hf_name("blk.0.attn_k_norm.weight") == "model.layers.0.self_attn.k_norm.weight"
+
+
+def test_hf_name_to_tsra_name_is_inverse_of_tsra_name_to_hf_name():
+    for kind in _PER_LAYER_MAP:
+        tsra_name = f"blk.7.{kind}"
+        hf_name = tsra_name_to_hf_name(tsra_name)
+        assert hf_name_to_tsra_name(hf_name) == tsra_name
+    for tsra_name in _GLOBAL_MAP:
+        hf_name = tsra_name_to_hf_name(tsra_name)
+        assert hf_name_to_tsra_name(hf_name) == tsra_name
+
+
+def test_hf_name_to_tsra_name_returns_none_for_unmapped():
+    assert hf_name_to_tsra_name("lm_head.weight") is None
+    assert hf_name_to_tsra_name("model.rotary_emb.inv_freq") is None
+    assert hf_name_to_tsra_name("some.totally.unrelated.key") is None

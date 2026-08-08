@@ -1,13 +1,14 @@
 """Evaluation harness (spec §10, M0 / §13).
 
-M0 acceptance: Qwen2.5-1.5B loads; baseline WikiText-2 ppl and HumanEval subset reproduce to
-±0.05 / ±1 problem across two runs. Everything downstream (M1 sweep, M2 allocator eval, M4
-runtime tok/s) is measured against the same metric functions defined here, so the baseline
-reproducibility check is the harness's own self-test, not a one-off script.
+M0 acceptance: Qwen3-1.7B loads with `enable_thinking=False` asserted (spec §4.1 amendment);
+baseline WikiText-2 ppl and HumanEval subset reproduce to ±0.05 / ±1 problem across two runs.
+Everything downstream (M1 sweep, M2 allocator eval, M4 runtime tok/s) is measured against the
+same metric functions defined here, so the baseline reproducibility check is the harness's own
+self-test, not a one-off script.
 
-Needs torch/transformers/datasets/lm-eval + a real Qwen2.5 checkout and network access; not
-runnable in this environment. `eval/figures.py` (Pareto/heatmap/correlation plots) is the part of
-this milestone that's dependency-light and unit-tested without a model.
+Needs torch/transformers/datasets/lm-eval + a real Qwen3 checkout and network access.
+`eval/figures.py` (Pareto/heatmap/correlation plots) is the part of this milestone that's
+dependency-light and unit-tested without a model.
 """
 from __future__ import annotations
 
@@ -40,20 +41,37 @@ def evaluate_wikitext_ppl(model, tokenizer, n_samples: int = 128, seq_len: int =
 
 def evaluate_humaneval_pass1(model, tokenizer, n_problems: int = 40) -> float:
     """HumanEval subset, pass@1 (spec §4.1 code domain metric). Delegates to lm-eval-harness;
-    kept as a thin wrapper so sweep.py/allocate.py don't take a direct lm-eval dependency."""
+    kept as a thin wrapper so sweep.py/allocate.py don't take a direct lm-eval dependency.
+    `enable_thinking=False` is non-negotiable (spec §4.1 amendment) — asserted, not defaulted."""
+    from compiler.calib import assert_thinking_disabled
+
+    assert_thinking_disabled(tokenizer)
     import lm_eval
 
     results = lm_eval.simple_evaluate(
-        model="hf", model_args={"pretrained": model}, tasks=["humaneval"], limit=n_problems
+        model="hf",
+        model_args={"pretrained": model},
+        tasks=["humaneval"],
+        limit=n_problems,
+        apply_chat_template=True,
+        chat_template_args={"enable_thinking": False},
     )
     return results["results"]["humaneval"]["pass@1"]
 
 
 def evaluate_gsm8k_exact_match(model, tokenizer, n_problems: int = 100) -> float:
+    from compiler.calib import assert_thinking_disabled
+
+    assert_thinking_disabled(tokenizer)
     import lm_eval
 
     results = lm_eval.simple_evaluate(
-        model="hf", model_args={"pretrained": model}, tasks=["gsm8k"], limit=n_problems
+        model="hf",
+        model_args={"pretrained": model},
+        tasks=["gsm8k"],
+        limit=n_problems,
+        apply_chat_template=True,
+        chat_template_args={"enable_thinking": False},
     )
     return results["results"]["gsm8k"]["exact_match"]
 
@@ -64,7 +82,10 @@ def run_baseline_reproducibility_check(model_name: str, n_runs: int = 2) -> bool
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    from compiler.calib import assert_thinking_disabled
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    assert_thinking_disabled(tokenizer)
     ppls = []
     for _ in range(n_runs):
         model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)
@@ -87,8 +108,11 @@ def evaluate_profile(model_name: str, tsra_path: str, manifest_path: str, device
     from runtime.model import from_manifest
     from transformers import AutoTokenizer
 
+    from compiler.calib import assert_thinking_disabled
+
     manifest = json.loads(Path(manifest_path).read_text())
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    assert_thinking_disabled(tokenizer)
     model = from_manifest(model_name, tsra_path, manifest, device=device)
 
     ppl = evaluate_wikitext_ppl(model, tokenizer)
@@ -97,7 +121,7 @@ def evaluate_profile(model_name: str, tsra_path: str, manifest_path: str, device
     gsm8k = evaluate_gsm8k_exact_match(model, tokenizer) if domain == "math" else None
 
     t0 = time.time()
-    _, tps = generate(model, tokenizer, "def fibonacci(n):", max_new_tokens=64)
+    _, tps = generate(model, tokenizer, [{"role": "user", "content": "def fibonacci(n):"}], max_new_tokens=64)
     elapsed = time.time() - t0
 
     return EvalResult(
@@ -119,7 +143,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     repro = sub.add_parser("reproducibility", help="M0 baseline reproducibility check")
-    repro.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
+    repro.add_argument("--model", default="Qwen/Qwen3-1.7B")
 
     ev = sub.add_parser("profile", help="evaluate one manifest")
     ev.add_argument("--model", required=True)

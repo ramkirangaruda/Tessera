@@ -12,7 +12,7 @@ from daemon.usb import DongleSimulator, LoopbackTransport, push_state_and_wipe, 
 MANIFEST = {
     "profile_id": "code@1100MB",
     "schema_version": 1,
-    "model": "qwen2.5-1.5b-instruct",
+    "model": "qwen3-1.7b",
     "domain": "code",
     "budget_bytes": 1153433600,
     "measured_bytes": 1149203968,

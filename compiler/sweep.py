@@ -1,16 +1,21 @@
 """Fake-quant sensitivity sweep (spec §4.1).
 
-For each of the 197 quantizable tensors in Qwen2.5-1.5B-Instruct, and each candidate bit-width,
-fake-quantize *only* that tensor (quantize -> dequantize back to fp16 in-place, everything else
-untouched), evaluate perplexity on the domain calibration set, and record delta vs the fp16
-baseline. 197 tensors x 6 widths x 4 domains = 4,728 evaluations; embarrassingly parallel across
-tensors, run unattended overnight on a GPU (spec: "Start this early. It is the long pole.").
+For each of the 197 quantizable tensors in Qwen3-1.7B (model family amended from Qwen2.5 — spec
+§2), and each candidate bit-width, fake-quantize *only* that tensor (quantize -> dequantize back
+to fp16 in-place, everything else untouched), evaluate perplexity on the domain calibration set,
+and record delta vs the fp16 baseline. 197 tensors x 6 widths x 4 domains = 4,728 evaluations;
+embarrassingly parallel across tensors, run unattended overnight on a GPU (spec: "Start this
+early. It is the long pole.").
 
-Requires transformers/torch and network access to pull Qwen2.5-1.5B-Instruct + calibration sets;
-not runnable in this environment. Run with:
+Requires transformers/torch and network access to pull Qwen3-1.7B + calibration sets. Run with:
 
-    python -m compiler.sweep --model Qwen/Qwen2.5-1.5B-Instruct \
+    python -m compiler.sweep --model Qwen/Qwen3-1.7B \
         --domains chat code math summ --out compiler/sensitivity.parquet
+
+`enable_thinking=False` is non-negotiable (spec §4.1 amendment) — Qwen3's hybrid thinking mode
+would inflate this 4,728-evaluation sweep by orders of magnitude and inject variance that swamps
+the quantization signal. run_sweep asserts it's actually passed to the chat template, not just
+defaulted.
 
 The fake-quant math here MUST match format/bitplane.py's quantize_asymmetric exactly (same
 group size, same asymmetric formula) — the sweep is measuring damage from the same quantizer
@@ -135,7 +140,7 @@ def run_sweep(model_name: str, domains: Iterable[str], out_path: str, group_size
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
+    ap.add_argument("--model", default="Qwen/Qwen3-1.7B")
     ap.add_argument("--domains", nargs="+", default=list(DOMAINS), choices=list(DOMAINS))
     ap.add_argument("--out", default="compiler/sensitivity.parquet")
     ap.add_argument("--group-size", type=int, default=128)

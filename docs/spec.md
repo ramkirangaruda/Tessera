@@ -36,56 +36,244 @@ And one product claim, which is what makes it demoable:
 - Beating state-of-the-art quantization on absolute quality. The claim is *better quality per byte
   at a given device budget and task*, not a new SOTA quantizer.
 ### Non-negotiable design decisions (do not relitigate)
-- Model family is **Qwen2.5**. Frozen on day one.
+- Model family is **Qwen3 dense** (`Qwen3-1.7B` primary, `Qwen3-0.6B` lowest tier). Frozen as of
+  this amendment — see "Model family amendment" below for the full rationale and the numbers that
+  were re-derived (not assumed) before this was locked. `Qwen2.5-1.5B` / `Qwen2.5-0.5B` are kept as
+  a **secondary validation run**, not the primary substrate (§13 cross-model replication).
 - The nested artifact is **pre-installed on each device**. The dongle carries only manifests +
   session state (kilobytes), never gigabytes of weights.
 - Portable context is **transcript + summary + embeddings**, never a raw KV cache.
+
+### Model family amendment (Qwen2.5 → Qwen3, applied before M0)
+
+**Why the switch.** Qwen3 dense models keep the same architecture shape as Qwen2.5 — GQA, SwiGLU,
+RoPE, RMSNorm pre-norm — so the format, packer, and allocator are unchanged by this amendment.
+`Qwen3-1.7B` has materially more headroom on STEM and coding than `Qwen2.5-1.5B`, which matters
+because the task-conditioned sensitivity claim (§1 claim 1) is only measurable if the base model
+has real competence in every domain being tested — a domain the model can't do at all doesn't
+produce a meaningful sensitivity signal, it produces noise.
+
+**Explicitly rejected, with reasons (a judge will ask):**
+- **Qwen3.5 small series (0.8B/2B/4B), hybrid Gated DeltaNet + sparse MoE.** MoE confounds
+  sensitivity measurement — a rarely-routed expert reads as low-sensitivity in the sweep and gets
+  crushed, then fails catastrophically on the inputs that actually route to it. Sparse activation
+  is also not sparse residency, which breaks the budget-vs-footprint narrative (§3's whole point is
+  that the allocator spends against what's *resident*). And Gated DeltaNet has no conventional KV
+  cache, which invalidates the §6 argument for why the KV cache isn't transported.
+- **Gemma 4 E2B/E4B.** Effective-parameter models, not plain dense — same "what's actually
+  resident" problem as above. Also ships QAT checkpoints, an awkward substrate for a project whose
+  entire contribution is post-training quantization.
+- **Principle to hold:** the model is the substrate, not the contribution. Pick the most boring,
+  best-characterized dense transformer available, so measured deltas are attributable to the
+  allocator alone. Qwen3 dense is that model; the hybrid/MoE options are not.
+
+**Architecture verification (done before M0, not assumed — pulled `config.json` directly):**
+both `Qwen3-1.7B` and `Qwen3-0.6B` are `Qwen3ForCausalLM`, `tie_word_embeddings: true`,
+28 layers, `head_dim=128`, `num_key_value_heads=8`. Full rebuilt tables are in §3. One real
+architectural difference from Qwen2.5 worth flagging: Qwen3 decouples `head_dim` from
+`hidden_size / num_attention_heads` (head_dim is fixed at 128 regardless), so `q_proj`/`o_proj`
+are not square for `Qwen3-0.6B` the way they were for every Qwen2.5 size. Qwen3 also adds a
+per-head `q_norm`/`k_norm` RMSNorm (on `head_dim`, i.e. 128 params each) that Qwen2.5 doesn't
+have — negligible bytes, same treatment as every other norm tensor (always fp16, excluded from
+the search), but it's two more raw tensors per layer the runtime's state-dict mapping needs to
+know about.
+
+**Decision gates hit by this amendment (both triggered — see §3 for the numbers):**
+1. KV-cache bytes/token for Qwen3 is **exactly 4.0×** the Qwen2.5-1.5B figure (114,688 vs 28,672
+   B/token) — over the 3× threshold, so KV-cache quantization is **promoted from stretch goal
+   (old §9 item 4) to the M4 critical path**. See §3 KV cache and the updated §9/§10.
+2. `Qwen3-0.6B` **does fit** the Pi Zero 2W's ~350 MB realistically-free budget at 3-bit including
+   the embedding table (248.7 MiB, ~101 MiB headroom) — but that headroom is tight enough
+   (~925 tokens of fp16 KV cache) that it's KV-cache quantization, not slack, that makes the
+   survival tier comfortable. No alternative third tier was needed; see §3 for the full number.
 ---
 ## 3. Target models and hardware
 | Device | RAM | Model | Profiles |
 |---|---|---|---|
-| Laptop (dev machine) | 8–16 GB | Qwen2.5-1.5B-Instruct | quality, balanced |
-| Raspberry Pi 5 | 4 GB | Qwen2.5-1.5B-Instruct | balanced, survival |
-| Raspberry Pi Zero 2W | 512 MB | Qwen2.5-0.5B-Instruct | survival only |
-The Zero cannot host 1.5B at any usable bit-width once the OS is accounted for. It runs 0.5B.
+| Laptop (dev machine) | 8–16 GB | Qwen3-1.7B | quality, balanced |
+| Raspberry Pi 5 | 4 GB (confirmed) | Qwen3-1.7B | quality (short context) → balanced/survival (long context) — retiered by contested memory, not device class; see below |
+| Raspberry Pi Zero 2W | 512 MB | Qwen3-0.6B | survival only |
+Secondary validation tier (§13 cross-model replication, not part of the live demo): the same
+three profiles re-run against `Qwen2.5-1.5B-Instruct` / `Qwen2.5-0.5B-Instruct`.
+The Zero cannot host 1.7B at any usable bit-width once the OS is accounted for. It runs 0.6B.
 This is a feature, not a compromise: because portable context is a transcript rather than a KV
 cache, the session survives a **model swap**, not just a precision swap. Say this out loud in the
 pitch — it is the strongest defence of the transport design.
-### Qwen2.5-1.5B-Instruct architecture (verify against `config.json` before relying on these)
+
+### Pi 5 hardware confirmed — retiering amendment (applied before M0)
+
+**Realistic memory budget** (Raspberry Pi OS Lite 64-bit, headless — see hardware notes below):
+~3.2 GB free at the OS level, minus ~150 MB for the daemon + dashboard backend, minus runtime
+overhead. **~2.9 GB usable with a ggml/llama.cpp backend, ~2.4 GB with PyTorch** — this gap is
+itself why the runtime backend decision below is no longer optional (§15 open decision 6,
+resolved by this amendment).
+
+**The problem:** `Qwen3-1.7B` at 8-bit is 1743.3 MiB (≈1.70 GiB, computed §3 table below) — a
+4 GB Pi 5 is not genuinely memory-constrained for this model at rest. Forcing the demo down to
+4-bit on the Pi 5 for no real reason would be a manufactured constraint, and it's exactly the
+kind of thing a judge who's done the arithmetic will call out.
+
+**The fix — retier by contested memory, not device class.** Keep `Qwen3-1.7B` on both laptop and
+Pi 5 (no second model, no second sensitivity sweep). On the Pi 5, the demo runs a long session
+(target ~30k+ tokens) so the KV cache genuinely competes with the weights for the same budget —
+the allocator has to shrink the weights to make room, live, on the same artifact. This is the
+existing device-conditioned allocation machinery (§7 `CAPS`/`PROFILE` handshake) doing real work,
+not a scripted precision drop.
+
+**The numbers that decide this (computed, not assumed — kv_heads=8, 114,688 B/token = 112.0
+KiB/token fp16, per §3 KV cache table below):**
+
+| Context | KV (fp16) | Weight budget left (of 2.9 GB) | KV (8-bit K / 4-bit V, 42.0 KiB/token) | Weight budget left |
+|---|---|---|---|---|
+| 8k | 896.0 MiB | 2073.6 MiB (8-bit weights fit, 330 MiB spare) | 336.0 MiB | 2633.6 MiB (fits easily) |
+| ~11.2k | crosses over | 8-bit weights (1743.3 MiB) no longer fit | — | still fits |
+| 16k | 1792.0 MiB | 1177.6 MiB (forces ≤4-bit) | 672.0 MiB | 2297.6 MiB (fits) |
+| ~29.9k | — | — | crosses over | 8-bit weights no longer fit |
+| 32k | 3584.0 MiB (**over budget alone**) | infeasible | 1344.0 MiB | 1625.6 MiB (forces ~6–7-bit) |
+
+Two crossover points, both real: **without** KV-cache quantization, weights must drop below
+8-bit past **~11,200 tokens**; **with** it (8-bit K / 4-bit V, promoted to the M4 critical path
+by the previous amendment — §9), the crossover moves out to **~29,900 tokens**, almost exactly
+the "30k+" target. **Recommendation: demo the Pi 5 tier at 32k tokens of context** — a round,
+defensible number, past both crossovers, that forces a real (not cosmetic) reduction below
+8-bit even with KV quantization live. Rewrite demo step 3 (§12) around this: same device, same
+`.tsra` artifact, weights visibly shrink on the heatmap as the session's KV reservation grows —
+not a device swap, a budget-pressure swap.
+
+**Alternative considered and rejected (reported per the decision-gate instruction, not silently
+dropped): move the Pi 5 tier to `Qwen3-4B`.** Verified against the real `config.json` (36 layers,
+`hidden_size=2560`, `kv_heads=8`, `head_dim=128`, `intermediate_size=9728`, ~4.02B params — the
+user's approximate 2.2 GB@4-bit / 4.2 GB@8-bit figures check out: computed 2157.7 MiB@4-bit /
+4075.7 MiB@8-bit). This would make the memory constraint real too (4-bit is a genuine squeeze
+against a 2.9 GB budget) — but it costs a **second full sensitivity sweep** (another 4,728
+GPU-evaluations, §4.1) for a device tier that isn't even the one under real pressure at rest, and
+it's a *weaker* demo: "a bigger model forced to run small" restates the device-conditioning claim
+you already have from the Pi Zero tier, where "the same artifact shrinks live as a real session
+grows" demonstrates something new — that allocation responds to *live* memory pressure, not just
+a static device profile. Rejected in favor of the long-context retier above.
+
+### Pi 5 — required host hardware and OS additions (spec amendment)
+
+Not dongle BOM (§7 — that's the USB key itself) — this is the Raspberry Pi 5 host device.
+
+- **NVMe HAT (official Pi 5 M.2 HAT+ or equivalent) — required.** Justified by the M3 load-time
+  criterion (§10): a ~1.1 GB profile at microSD's ~90 MB/s sequential read is ~12.2 s just for
+  I/O, already over the 8 s cold-load budget before parse/setup overhead. Over the Pi 5's stock
+  PCIe Gen2 x1 NVMe link (~450 MB/s sustained is a realistic, commonly-cited figure for this HAT
+  class), the same read is ~2.4 s — comfortably inside budget. Pi Zero 2W is unaffected (no PCIe,
+  microSD only) and doesn't need this: its profiles are ~250–320 MiB (§3 Pi Zero fit check), and
+  250 MB at 90 MB/s is ~2.9 s — already well under 8 s on microSD alone.
+- **Active cooling (official Pi 5 Active Cooler or equivalent) — required.** Sustained inference
+  throttles the BCM2712 SoC without it, which makes the tokens/sec figures in §13 non-reproducible
+  run to run — a fan isn't cosmetic here, it's what makes the throughput numbers trustworthy.
+- **Target OS: Raspberry Pi OS Lite 64-bit, headless.** No desktop environment; the dashboard is
+  served over the network to whatever's projecting it, not rendered locally. Minimize CMA
+  (contiguous memory reserved for the GPU/display path) in `config.txt` since no display is
+  attached — reduce or remove the `dtoverlay=vc4-kms-v3d` CMA reservation (default is commonly
+  ~256 MB on Pi 5; a fully headless box needs little to none of it). **This reclaim estimate is
+  unverified — it needs to be measured on the actual device** (`vcgencmd get_mem reloc_total` /
+  `/proc/meminfo` before and after the config change) at M4/M5, not assumed from general Pi
+  tuning knowledge the way it's stated here. Report the real reclaimed figure once measured; the
+  ~2.9 GB / ~2.4 GB budgets above already treat this as done, so an underperforming reclaim
+  tightens every number in this section and should be re-checked against them.
+
+### Qwen3-1.7B / Qwen3-0.6B architecture
+Pulled from `config.json` directly, not assumed — verify again if either checkpoint is updated
+upstream.
 ```
-layers              28
-hidden_size         1536
-attn heads          12       head_dim 128
-kv heads            2        (GQA)
-intermediate_size   8960
-vocab               151936
-tied embeddings     yes
+                     Qwen3-1.7B   Qwen3-0.6B
+layers               28           28
+hidden_size          2048         1024
+attn heads           16           16       head_dim 128 (both — fixed, decoupled from hidden_size)
+kv heads             8            8        (GQA)
+intermediate_size    6144         3072
+vocab                151936       151936
+tied embeddings      yes          yes
 ```
-Parameter accounting per layer:
+Note `head_dim=128` is fixed for both sizes rather than derived as `hidden_size / heads` (that
+was true for every Qwen2.5 size, isn't for Qwen3-0.6B: `16 × 128 = 2048 ≠ hidden_size(1024)`), so
+`attn_q`/`attn_o` are not square for the 0.6B model. Both sizes also have identical KV geometry
+(28 layers × 8 kv_heads × 128 head_dim) — model size scales `hidden_size`/`intermediate_size`
+only, so **KV-cache cost per token is identical across both tiers** (see below), unlike weight
+footprint which scales with the model.
+
+Parameter accounting per layer — **Qwen3-1.7B**:
 | Tensor | Shape | Params |
 |---|---|---|
-| `attn_q` | 1536 × 1536 | 2.36 M |
-| `attn_k` | 1536 × 256 | 0.39 M |
-| `attn_v` | 1536 × 256 | 0.39 M |
-| `attn_o` | 1536 × 1536 | 2.36 M |
-| `mlp_gate` | 1536 × 8960 | 13.76 M |
-| `mlp_up` | 1536 × 8960 | 13.76 M |
-| `mlp_down` | 8960 × 1536 | 13.76 M |
-| **total** | | **~46.8 M** |
-× 28 layers = ~1.31 B, plus `token_embd` at 151936 × 1536 = **233 M** (~15% of the whole model in
-one tensor). Total ≈ 1.54 B.
-**Two consequences that shape the whole allocator:**
-- MLP tensors are ~88% of per-layer weight. That is where the bytes are, and therefore where the
-  allocator spends most of its decisions.
-- `token_embd` is a single tensor worth more than five transformer blocks. It must be in the search
-  space, not pinned by convention.
-**Quantizable tensor count:** 7 per layer × 28 + `token_embd` = **197 knobs**.
-LayerNorm weights and biases stay fp16 — negligible bytes, high sensitivity.
+| `attn_q` | 2048 × 2048 | 4.19 M |
+| `attn_k` | 2048 × 1024 | 2.10 M |
+| `attn_v` | 2048 × 1024 | 2.10 M |
+| `attn_o` | 2048 × 2048 | 4.19 M |
+| `mlp_gate` | 2048 × 6144 | 12.58 M |
+| `mlp_up` | 2048 × 6144 | 12.58 M |
+| `mlp_down` | 6144 × 2048 | 12.58 M |
+| **total** | | **~50.33 M** |
+× 28 layers = ~1.409 B, plus `token_embd` at 151936 × 2048 = **311.16 M** (~18.1% of the whole
+model in one tensor — up from ~15% on Qwen2.5-1.5B, since `hidden_size` grew but `vocab` didn't).
+Total ≈ **1.720 B** (Qwen3-1.7B naming checks out).
+
+Parameter accounting per layer — **Qwen3-0.6B**:
+| Tensor | Shape | Params |
+|---|---|---|
+| `attn_q` | 1024 × 2048 | 2.10 M |
+| `attn_k` | 1024 × 1024 | 1.05 M |
+| `attn_v` | 1024 × 1024 | 1.05 M |
+| `attn_o` | 2048 × 1024 | 2.10 M |
+| `mlp_gate` | 1024 × 3072 | 3.15 M |
+| `mlp_up` | 1024 × 3072 | 3.15 M |
+| `mlp_down` | 3072 × 1024 | 3.15 M |
+| **total** | | **~15.73 M** |
+× 28 layers = ~440.4 M, plus `token_embd` at 151936 × 1024 = **155.58 M** (~26.1% of the whole
+model — the smaller the model, the more `token_embd` dominates, since vocab is shared across
+sizes). Total ≈ **0.596 B** (Qwen3-0.6B naming checks out).
+
+**Two consequences that shape the whole allocator (unchanged from the original Qwen2.5 analysis,
+now re-verified against real Qwen3 numbers):**
+- MLP tensors are ~75% of per-layer weight on Qwen3-1.7B (37.75 M / 50.33 M — down from ~88% on
+  Qwen2.5-1.5B, because Qwen3's GQA is less aggressive: 8 kv_heads vs Qwen2.5's 2, which grows
+  `attn_k`/`attn_v` relative to MLP). MLP is still where most of the bytes are, just less
+  lopsidedly than before — worth re-checking after M1 rather than assuming the old 88% figure.
+- `token_embd` is bigger relative to the whole model than it was on Qwen2.5 (18–26% depending on
+  size, vs ~15%). It must be in the search space, not pinned by convention — more true now, not
+  less.
+
+**Quantizable tensor count:** 7 per layer × 28 + `token_embd` = **197 knobs** — verified unchanged
+from the Qwen2.5 figure (the new `q_norm`/`k_norm` tensors are 1-D and excluded from the search
+the same way every other norm tensor is, so they don't add knobs; they do add 2 more raw-fp16
+tensors per layer the runtime's state-dict mapping must cover).
+LayerNorm/`q_norm`/`k_norm` weights and biases stay fp16 — negligible bytes, high sensitivity.
+
 ### KV cache
-`2 (K,V) × 28 layers × 2 kv_heads × 128 head_dim × 2 bytes = 28,672 B/token ≈ 28 KB/token`
-At 8k context that is ~230 MB; at 32k, ~900 MB — comparable to the quantized weights themselves.
-Weight quantization alone does not solve on-device memory. KV-cache quantization is tracked as a
-stretch goal (§9).
+`2 (K,V) × 28 layers × 8 kv_heads × 128 head_dim × 2 bytes = 114,688 B/token ≈ 112 KiB/token`
+— identical for both Qwen3-1.7B and Qwen3-0.6B (KV geometry doesn't scale with model size here).
+This is **exactly 4.0×** the Qwen2.5-1.5B figure (114,688 vs 28,672 B/token), because Qwen3 uses
+8 kv_heads where Qwen2.5-1.5B used only 2 — less aggressive GQA.
+
+| Context | Qwen3 fp16 (either size) | Qwen3 quantized (8-bit K / 4-bit V, 42.0 KiB/token) | Qwen2.5-1.5B fp16 (reference) |
+|---|---|---|---|
+| 2k | 224.0 MiB | 84.0 MiB | 56.0 MiB |
+| 8k | 896.0 MiB | 336.0 MiB | 224.0 MiB |
+| 32k | 3584.0 MiB | 1344.0 MiB | 896.0 MiB |
+Pi 5 retiering (below) is built directly on this table — see the crossover analysis there for
+why ~30k tokens is the number to design the Pi 5 demo tier around.
+
+**Decision gate (spec amendment, non-negotiable): 4.0× ≥ the 3× threshold, so KV-cache
+quantization is promoted from stretch goal to the M4 critical path** — see §9/§10. Weight
+quantization alone does not solve on-device memory even at the best of times; on Qwen3 it solves
+noticeably less of it than it did on Qwen2.5.
+
+**Pi Zero 2W fit check (decision gate, computed not assumed):** `Qwen3-0.6B` fully quantized
+(all 197 tensors + `token_embd`) at the allocator's 3-bit floor-adjacent budget:
+- 2-bit floor: 177.6 MiB · 3-bit: 248.7 MiB · 4-bit: 319.7 MiB
+Against a ~350 MB realistically-free budget, 3-bit fits with **~101 MiB headroom**. That headroom
+converts to KV cache at 112 KiB/token: **~925 tokens** of fp16 KV cache before the device is out
+of memory (~1,575 tokens at the 2-bit floor, ~172 MiB headroom). This *does* fit — no alternative
+third tier is needed — but the margin is thin enough that it's real evidence for, not just
+motivation for, promoting KV-cache quantization to the critical path: 8-bit K / 4-bit V roughly
+halves that per-token cost, meaningfully widening the survival tier's usable context window. The
+bounded warm-prefill design (§6 — constant-size prefill regardless of session length) is what
+keeps typical turns well inside this budget even before KV quantization lands; it was already the
+right call for a different reason (§6), and this amendment is further confirmation of it.
 ---
 ## 4. Component 1 — the precision compiler
 Offline. Runs on the dev machine / any GPU. Produces manifests.
@@ -107,8 +295,18 @@ Group size is a config knob; 128 is the default.
 | `math` | GSM8K train split | GSM8K test subset, exact match |
 | `summ` | CNN/DailyMail | ROUGE-L or perplexity on held-out |
 **Cost:** 197 tensors × 6 widths × 4 domains = 4,728 evaluations. Each is a forward pass over the
-calibration set on a 1.5B model — seconds on a GPU. Parallelize across tensors; this can run
+calibration set on a ~1.7B model — seconds on a GPU. Parallelize across tensors; this can run
 unattended overnight. **Start this early.** It is the long pole and it is embarrassingly parallel.
+
+**Non-negotiable eval config (spec amendment): `enable_thinking=False` for every sweep and eval
+run, asserted in the harness, not just defaulted.** Qwen3 has a hybrid thinking mode; a reasoning
+trace on every one of the 4,728 evaluations would inflate the sweep by orders of magnitude and
+inject variance that swamps the quantization signal you're actually trying to measure. This is a
+chat-template kwarg (`tokenizer.apply_chat_template(..., enable_thinking=False)`), verified present
+on both `Qwen3-1.7B` and `Qwen3-0.6B`'s chat templates — assert it's actually being passed rather
+than trusting a default, since a silent default flip would be a very expensive bug to discover
+after an overnight sweep.
+
 **Output:** `sensitivity.parquet`
 ```
 tensor_name, domain, bits, delta_ppl, delta_task_metric, bytes_at_bits, bytes_saved_vs_fp16
@@ -128,7 +326,7 @@ Guardrails the allocator must respect:
 {
   "profile_id": "code@1100MB",
   "schema_version": 1,
-  "model": "qwen2.5-1.5b-instruct",
+  "model": "qwen3-1.7b",
   "artifact_sha256": "…",
   "domain": "code",
   "budget_bytes": 1153433600,
@@ -196,10 +394,12 @@ It is a 15-second segment of the demo and there is no cheaper way to look impres
 ## 6. Component 3 — portable session (what travels)
 ### What is NOT transported, and why
 The KV cache. Three independent reasons, all of which a judge may probe:
-1. **Size.** ~28 KB/token; ~900 MB at 32k context. Over USB CDC this is minutes.
+1. **Size.** ~112 KiB/token on Qwen3 (§3 — 4× the original Qwen2.5 estimate this argument was
+   first written against); ~3.5 GB at 32k context. Over USB CDC this is minutes, not seconds — more
+   true now than when this was scoped, not less.
 2. **Numerical validity.** A KV cache is an activation produced by *specific* weights. A cache from
    a 4-bit forward pass fed into a 6-bit forward pass is unprincipled and degrades silently.
-3. **Model portability.** It cannot survive the 1.5B → 0.5B switch at all.
+3. **Model portability.** It cannot survive the 1.7B → 0.6B switch at all.
 ### What IS transported
 ```
 bundle/
@@ -230,7 +430,7 @@ only, never on disk.
 |---|---|
 | RP2040 (Pico) or ESP32-S3 | MCU; USB composite device (MSC + CDC) |
 | ATECC608A | Secure element — key storage, ECDH, signing |
-| SSD1306 128×64 OLED (I²C) | Live readout: `CODE · 5-bit · 1.1 GB` |
+| SSD1306 128×64 OLED (I²C) | Live readout: `CODE · 5-bit · 1.1 GB` (illustrative — real figures come from M4 measurement on Qwen3, see §3/§12) |
 | WS2812 RGB LED | State: idle / handshake / streaming / active |
 | Momentary button | Cycle Quality / Balanced / Survival |
 | SPDT slide switch | **Hardware write-protect.** Physical read-only. |
@@ -280,19 +480,35 @@ Ranked by demo value per unit effort:
 2. **Fitted per-`k` refinement scales** (§5.1) — closes the nesting quality tax.
 3. **Runtime bit-plane drop under simulated memory pressure** — allocate a ballast buffer, watch the
    model shed a plane and keep going.
-4. **KV-cache quantization** (8-bit K, 4-bit V is the usual sweet spot) — the largest remaining
-   memory win, and nobody else at the event will have done it.
-5. **ggml / llama.cpp backend** for real speed on the Pis.
+
+**No longer a stretch goal — promoted to the M4 critical path** (spec amendment, §3 decision
+gate): KV-cache quantization (8-bit K, 4-bit V is the usual sweet spot). Qwen3's KV-cache cost is
+4.0× the figure this was originally scoped against, which crossed the promotion threshold. See §10.
+
+**No longer a stretch goal — promoted to a hard M4 dependency on Pi 5 and Pi Zero 2W (spec
+amendment, resolves §15 open decision 6):** the ggml/llama.cpp backend. PyTorch carries a fixed
+~400–600 MB process tax before any weights load — on an 8–16 GB laptop that's noise, but on a
+2.9 GB (ggml) / 2.4 GB (PyTorch) Pi 5 budget it's the difference between the M4 RSS criterion
+being meaningful or not (see §10), and on the Pi Zero's ~350 MB survival tier it doesn't fit at
+all. **PyTorch remains the laptop backend** (better iteration speed during development, budget is
+roomy enough that the tax doesn't matter); **ggml/llama.cpp is required on both Pi tiers.**
+
+**Recorded but not building (future work, spec amendment):** per-expert bit allocation for MoE
+models. Routing frequency confounds sensitivity measurement the same way it did for the rejected
+Qwen3.5 hybrid option (§2) — a rarely-routed expert looks insensitive in a sweep that never
+exercises it, then fails badly on the inputs that do route to it. Would need a routing-frequency-
+weighted sensitivity metric, not the flat per-tensor sweep this project uses. Out of scope for
+this build; noted here so it isn't rediscovered as if new.
 ---
 ## 10. Milestones and acceptance criteria
 Ship in this order. Each milestone has a binary acceptance test.
 | # | Milestone | Acceptance criteria |
 |---|---|---|
-| **M0** | Repo + eval harness | Qwen2.5-1.5B loads; baseline WikiText-2 ppl and HumanEval subset reproduce to ±0.05 / ±1 problem across two runs |
-| **M1** | Fake-quant sweep | `sensitivity.parquet` populated for 197 tensors × 6 widths × 4 domains; no NaNs; per-domain Spearman correlations computed |
+| **M0** | Repo + eval harness | Qwen3-1.7B loads with `enable_thinking=False` asserted; baseline WikiText-2 ppl and HumanEval subset reproduce to ±0.05 / ±1 problem across two runs |
+| **M1** | Fake-quant sweep | `sensitivity.parquet` populated for 197 tensors × 6 widths × 4 domains on Qwen3-1.7B; no NaNs; per-domain Spearman correlations computed |
 | **M2** | Allocator | Given (domain, budget) emits a valid manifest; at equal bytes, beats uniform quantization on ≥2 of 3 metrics for at least 3 of 4 domains |
-| **M3** | Bit-plane format | `.tsra` round-trips; loading at `k` planes matches reference `k`-bit fake-quant within 1e-3 MSE; load time for a 1.1 GB profile under 8 s cold |
-| **M4** | Runtime | Generates coherent text at quality / balanced / survival; measured RSS within 5% of `measured_bytes`; tokens/sec recorded per device per profile |
+| **M3** | Bit-plane format | `.tsra` round-trips; loading at `k` planes matches reference `k`-bit fake-quant within 1e-3 MSE; load time for a 1.1 GB profile under 8 s cold **on Pi 5 with the required NVMe HAT (spec amendment — microSD's ~90 MB/s makes 8 s unachievable for a profile this size, ~12.2 s just for I/O; NVMe's ~450 MB/s brings it to ~2.4 s). Pi Zero is unaffected and stays on microSD — its ~250–320 MiB profiles clear 8 s there without help** |
+| **M4** | Runtime | Generates coherent text at quality / balanced / survival; tokens/sec recorded per device per profile; **KV-cache quantized (8-bit K / 4-bit V) and included in the RSS/footprint measurement on Pi 5 and Pi Zero — promoted from stretch goal by the §3 decision gate (4.0× the originally-scoped KV cost), not optional for M4 sign-off on those two devices.** **RSS criterion is backend-conditioned (spec amendment — PyTorch's ~400–600 MB fixed tax makes a flat 5% bound meaningless on a 2.4–2.9 GB device budget): on Pi 5/Pi Zero (ggml/llama.cpp, now required — §9/§15), measured RSS within 5% of (`measured_bytes` weights + KV-cache bytes at the session's actual context length); on laptop (PyTorch), RSS is reported for information, not gated at 5%.** Pi 5 tier specifically must also demonstrate the §3 long-context retier: weights visibly shrink as a session's KV reservation grows past the ~11.2k (unquantized KV) / ~29.9k (quantized KV) crossover, at a fixed device profile — not a device swap |
 | **M5** | Firmware + protocol | Full handshake completes; bundle round-trips encrypted; OLED and LED reflect state; write-protect switch actually blocks writes |
 | **M6** | Daemon + wipe | Unplug wipes host state verifiably; replug on a *different* device resumes the conversation with correct context |
 | **M7** | Dashboard + demo rig | The 5-step choreography (§12) runs end-to-end **twice consecutively** with no human intervention beyond plugging and typing |
@@ -338,21 +554,36 @@ tessera/
 Recharts.
 **Team split (4 people):**
 - **A — compiler:** M1, M2, the sensitivity result, the correlation analysis
-- **B — format + runtime:** M3, M4, stretch goals 2 and 3
+- **B — format + runtime:** M3, M4 (including KV-cache quantization — now critical path, §3/§9),
+  stretch goals 2 and 3
 - **C — hardware:** M5, M6, firmware, protocol, daemon
 - **D — dashboard + demo:** M7, figures, pitch deck, running the rig
 D is not a spare part. Half of judging is whether the room can *see* what is happening.
 ---
 ## 12. Demo choreography
 Three devices on the table, one dongle, dashboard projected. Rehearse this until it is muscle
-memory.
-1. **Laptop, dongle in.** OLED: `CODE · 6-bit · 2.1 GB`. Debug a real code snippet — pull one from
-   an actual project, not a toy. Heatmap shows MLP tensors running rich.
+memory. OLED figures below are illustrative placeholders — real per-device footprints come out of
+M4 measurement on Qwen3 (§3 has the computed weight-only figures at 2/3/4-bit; the OLED shows
+weights + KV cache + runtime overhead, which isn't pinned down until M4 actually runs).
+1. **Laptop, dongle in.** OLED: `CODE · 6-bit · ~1.4 GB` (Qwen3-1.7B). Debug a real code snippet —
+   pull one from an actual project, not a toy. Heatmap shows MLP tensors running rich.
 2. **Unplug.** Laptop visibly wipes the session on screen. Dashboard shows the zeroize.
-3. **Into the Pi 5.** OLED: `CODE · 4-bit · 1.1 GB`. Ask a follow-up that is *only* answerable with
-   the earlier context. It answers correctly. Heatmap redraws leaner.
-4. **Into the Pi Zero 2W.** OLED: `CHAT · 3-bit · 380 MB`. Different model entirely — 0.5B. Slower,
-   simpler, still coherent, still remembers. Call out that the context survived a model swap.
+3. **Into the Pi 5 — same model, contested memory, not a device swap (spec amendment, §3).**
+   Resumes at quality/8-bit (`CODE · 8-bit · ~1.7 GB`) — a 4 GB Pi 5 genuinely isn't constrained
+   for `Qwen3-1.7B` at rest, and pretending otherwise is the thing a judge would catch. Then push
+   the session long: paste in the surrounding file(s) / a stack trace / a few related modules —
+   enough real material to land around **32k tokens** of context (spec §3 crossover: ~11.2k
+   without KV-cache quantization, ~29.9k with it — 32k clears both with margin). Narrate the
+   heatmap redrawing leaner **live**, on the same `.tsra` artifact, as the KV-cache reservation
+   grows: OLED settles around `CODE · ~7-bit · ~2.4 GB` (weights + quantized KV, illustrative
+   pending M4 measurement). Ask a follow-up that's only answerable from the earlier context — it
+   still answers correctly, at the new precision. The point being made: allocation responds to
+   *live* memory pressure, not a static per-device recipe.
+4. **Into the Pi Zero 2W.** OLED: `CHAT · 3-bit · ~250 MB` (Qwen3-0.6B). Different model entirely
+   — *this* is the device-class swap, deliberately saved for last so it isn't confused with step
+   3's budget-pressure swap. Slower, simpler, still coherent, still remembers. Call out that the
+   context survived a model swap — and that this tier is exactly why KV-cache quantization got
+   promoted to the critical path (§3 Pi Zero fit check): the headroom here is real but thin.
 5. **Ask a math question.** Domain shift detected; manifest swaps to `math`. Same file on disk, more
    planes on the tensors that matter for arithmetic. Heatmap visibly redistributes.
 Close on the Pareto plot with all profiles marked above the uniform baseline curve.
@@ -366,6 +597,20 @@ Collect these as you go, not the night before.
 - Cross-domain Spearman correlation matrix (§4.3) — the headline result if it comes out low
 - Nesting tax: nested `k`-bit vs independently optimized `k`-bit, per width
 - Bundle size distribution across session lengths
+- **Cross-model replication (spec amendment):** do the domain sensitivity rankings from
+  `Qwen3-1.7B` reproduce on `Qwen2.5-1.5B` (§2's secondary validation run)? Report the Spearman
+  correlation between the two models' per-domain tensor-sensitivity rankings. If they replicate,
+  this upgrades the task-conditioning finding from a checkpoint quirk to a property of the
+  architecture class — a headline result, not a footnote. Requires the Qwen2.5 sweep to actually
+  run (not just be scaffolded) — budget time for it precisely because this number is worth having.
+- **Pi 5 weight/KV crossover context length, measured (spec amendment):** the computed figures
+  (~11.2k tokens without KV-cache quantization, ~29.9k with it — §3) are derived from config.json
+  and the allocator's byte formulas, not measured on-device. Confirm them against real M4
+  measurement on the actual Pi 5 + NVMe HAT before the event — if the measured crossover is far
+  off from the computed one, the demo's 32k-token target (§12 step 3) needs to move with it.
+- **CMA reclaim on the Pi 5, measured (spec amendment):** `vcgencmd get_mem reloc_total` /
+  `/proc/meminfo` before and after the headless config change (§3) — the ~2.9 GB/~2.4 GB budgets
+  everything else in §3 is computed against assume this reclaim happened; report the real number.
 ---
 ## 14. Prior art — know it, do not be blindsided by it
 Someone will ask. Rehearse the one-breath answer.
@@ -382,6 +627,16 @@ automatically, per task domain, against the live memory budget of whatever devic
 out of a single nested artifact, with the session travelling on hardware."*
 Do a literature check before the event; this field moves fast and something may have landed
 recently that either validates or scoops a specific angle. Better to find it now.
+
+**Model family question ("why Qwen3 and not a MoE / hybrid model?", spec amendment §2):** a judge
+who knows the current landscape may ask why this doesn't use a sparse or hybrid architecture
+(Qwen3.5's small series, Gemma 4's effective-parameter models) given those are newer and often
+benchmark better per active-parameter. The answer is the same "substrate, not contribution"
+principle as the rest of this table: MoE routing frequency confounds per-tensor sensitivity
+measurement (§2, §9), and effective-parameter/hybrid models break the "budget is what's resident"
+premise the whole allocator is built on. Tessera's contribution is the allocator and the format,
+not the model — so the model should be the most boring, best-characterized dense transformer
+available, which is Qwen3 dense, not whatever benchmarks best this month.
 ---
 ## 15. Open decisions — ask, do not guess
 1. Group size: 128 vs 64. Affects scale overhead and quality. Sweep it at M1.
@@ -390,6 +645,8 @@ recently that either validates or scoops a specific angle. Better to find it now
 4. Domain detection (stretch 1): a small classifier, keyword heuristics, or manual button only?
 5. RP2040 vs ESP32-S3. ESP32-S3 gives more RAM and wireless headroom; RP2040 has cleaner TinyUSB
    composite support. Pick by whichever is physically in hand.
-6. Does the runtime stay in PyTorch, or port to ggml for the Pis? PyTorch on a Pi Zero will be
-   painful. Assess at M4.
+6. ~~Does the runtime stay in PyTorch, or port to ggml for the Pis? Assess at M4.~~ **Resolved by
+   the Pi 5 hardware amendment (§3, §9): PyTorch on laptop, ggml/llama.cpp required on both Pi
+   tiers.** PyTorch's ~400–600 MB fixed tax doesn't fit the Pi Zero's ~350 MB budget at all, and
+   makes the Pi 5's M4 RSS criterion unmeasurable at its 2.4 GB PyTorch budget vs 2.9 GB ggml.
 7. How many turns before the rolling summary regenerates? Tune against resume quality at M6.

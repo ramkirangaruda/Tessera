@@ -104,7 +104,7 @@ def build_manifest(
     allocation: Dict[str, int],
     domain: str,
     budget_bytes: int,
-    model: str = "qwen2.5-1.5b-instruct",
+    model: str = "qwen3-1.7b",
     artifact_sha256: str = "",
     eval_metrics: dict | None = None,
 ) -> dict:
@@ -152,7 +152,7 @@ def main() -> None:
     ap.add_argument("--domain", required=True, choices=["chat", "code", "math", "summ"])
     ap.add_argument("--budget-mb", type=float, required=True)
     ap.add_argument("--out", required=True, help="output manifest .json path")
-    ap.add_argument("--model", default="qwen2.5-1.5b-instruct")
+    ap.add_argument("--model", default="qwen3-1.7b")
     ap.add_argument("--artifact", default=None, help=".tsra path, for the sha256 field")
     args = ap.parse_args()
 

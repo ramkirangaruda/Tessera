@@ -51,7 +51,7 @@ specific truncation depth. These close the "nesting tax" against an independentl
 ```
 
 The directory is a single length-prefixed JSON blob (simplicity over a binary struct — this file
-is at most ~1.5B params / 197 tensors, directory parse cost is irrelevant next to the mmap read).
+is at most ~1.7B params / 197 tensors, directory parse cost is irrelevant next to the mmap read).
 Per tensor:
 
 ```json

@@ -2,8 +2,10 @@
 
 Thin CLI over runtime/model.py: pick a profile manifest, load the model at that precision, run
 bounded warm prefill (spec §6 — system prompt + summary + last N turns + retrieved spans, never
-the full transcript), and generate. Needs torch/transformers + a real .tsra artifact; not
-runnable in this environment.
+the full transcript), and generate through the real chat template with `enable_thinking=False`
+(spec §4.1 amendment — non-negotiable for Qwen3; §13 secondary validation on Qwen2.5 has no
+thinking mode to disable, see compiler.calib.render_chat_prompt). Needs torch/transformers + a
+real .tsra artifact.
 """
 from __future__ import annotations
 
@@ -27,19 +29,26 @@ def build_prefill_prompt(system_prompt: str, summary_md: str, last_turns: list[d
     return "\n\n".join(parts)
 
 
-def generate(model, tokenizer, prompt: str, max_new_tokens: int = 256):
+def generate(model, tokenizer, messages: list[dict], max_new_tokens: int = 256):
+    """`messages`: chat-format list of {role, content} dicts — rendered through the tokenizer's
+    own chat template (compiler.calib.render_chat_prompt), not hand-assembled, so this exercises
+    the real prompt format the model was trained on rather than an approximation of it."""
     import torch
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    from compiler.calib import QWEN3_NO_THINK_SAMPLING, assert_thinking_disabled, render_chat_prompt
+
+    assert_thinking_disabled(tokenizer)
+    prompt = render_chat_prompt(tokenizer, messages)
+
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
     t0 = time.time()
     with torch.no_grad():
         out = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
             pad_token_id=tokenizer.eos_token_id,
+            **QWEN3_NO_THINK_SAMPLING,
         )
     elapsed = time.time() - t0
     n_new = out.shape[1] - inputs["input_ids"].shape[1]
@@ -75,9 +84,9 @@ def main() -> None:
             last_turns = [json.loads(line) for line in transcript_path.read_text().splitlines() if line.strip()]
 
     prefill = build_prefill_prompt(system_prompt, summary_md, last_turns, retrieved_spans)
-    full_prompt = f"{prefill}\n\nuser: {args.prompt}\nassistant:"
+    messages = [{"role": "system", "content": prefill}, {"role": "user", "content": args.prompt}]
 
-    text, tps = generate(model, tokenizer, full_prompt)
+    text, tps = generate(model, tokenizer, messages)
     print(text)
     print(f"\n[{tps:.1f} tok/s, profile={manifest['profile_id']}, measured_bytes={manifest['measured_bytes']}]")
 
