@@ -124,7 +124,8 @@ def build_manifest(
 def load_sensitivity(parquet_path: str, domain: str) -> Dict[str, TensorOptions]:
     """Build the {tensor: {bits: (damage, bytes)}} structure for one domain from
     compiler/sweep.py's `sensitivity.parquet` output (columns: tensor_name, domain, bits,
-    delta_ppl, delta_task_metric, bytes_at_bits, bytes_saved_vs_fp16)."""
+    delta_ppl, bytes_at_bits, bytes_saved_vs_fp16 — spec §4.1 amendment: task metrics are no
+    longer per-row, see eval/harness.py's confirmation-metric step instead)."""
     import pandas as pd
 
     df = pd.read_parquet(parquet_path)

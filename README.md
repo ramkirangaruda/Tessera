@@ -40,12 +40,12 @@ develop in parallel against a mocked bundle.
 
 | # | Milestone | Status |
 |---|---|---|
-| M0 | Repo + eval harness | in progress |
-| M1 | Fake-quant sensitivity sweep | scaffolded, needs GPU run |
-| M2 | Allocator | implemented |
-| M3 | Bit-plane format | implemented, round-trip tested |
-| M4 | Runtime | scaffolded |
-| M5 | Firmware + protocol | scaffolded |
+| M0 | Repo + eval harness | **done, verified against real Qwen3-1.7B** — WikiText-2 ppl 16.7835, reproducible |
+| M1 | Fake-quant sensitivity sweep | scaffolded with pre-flight checks (spec §4.1); not yet run |
+| M2 | Allocator | scaffolded, code beats uniform allocation **on synthetic data only** — not validated until it runs against real M1 output (spec §4.2 amendment: this is not the same claim) |
+| M3 | Bit-plane format | round-trips correctly on real weights; load time still well over the 8s target on unaccelerated storage (compute path vectorized, disk I/O now the bottleneck — see spec §3 NVMe rationale) |
+| M4 | Runtime | generates correct real text on GPU; RSS does not yet track `measured_bytes` on the PyTorch backend (expected — see spec §9, real memory reduction requires ggml/llama.cpp, not yet built) |
+| M5 | Firmware + protocol | scaffolded, handshake tested end-to-end against a software-simulated dongle |
 | M6 | Daemon + wipe | scaffolded |
 | M7 | Dashboard + demo rig | scaffolded |
 

@@ -278,39 +278,116 @@ right call for a different reason (§6), and this amendment is further confirmat
 ## 4. Component 1 — the precision compiler
 Offline. Runs on the dev machine / any GPU. Produces manifests.
 ### 4.1 Sensitivity sweep
+
+**Metric correction (spec amendment — the original two-metrics-per-domain table below was
+wrong as written):** the sweep does **not** call HumanEval or GSM8K per tensor per bit-width.
+That's 4,728 *generative* evaluations — sampling variance on top of a measurement that's
+already trying to detect small deltas, and orders of magnitude more compute than a forward pass.
+Two-tier scheme instead:
+
+- **Sweep metric (all 4,728 evaluations): perplexity on domain-specific held-out text.**
+  Forward pass only, deterministic, no sampling. This is what every tensor × bits × domain
+  combination measures.
+- **Confirmation metric (~20 evaluations total, run once, on M2's output, not per-tensor):**
+  HumanEval pass@1 / GSM8K exact match, run only on the *final allocations* the allocator
+  actually picks for each domain × budget tier — i.e., "does the manifest the allocator
+  produced actually perform," not "does every individual tensor perform." See §4.2.
+
+**Proxy validation — run before the full sweep, not after (spec amendment).** The sweep metric
+being perplexity is only justified if perplexity delta actually predicts task-quality delta.
+Before committing to an unattended overnight run:
+1. Pick 15 tensors stratified across the expected sensitivity range (mix of layer depth,
+   attn vs. mlp, and `token_embd`) — not a random sample, a deliberately spread one.
+2. Fake-quantize each to one representative low bit-width (3-bit — low enough that damage is
+   visible, high enough not to be degenerate).
+3. Measure **both** delta-ppl (domain held-out text) and delta-pass@1 (HumanEval) for each —
+   ~30 evaluations total.
+4. Compute the Spearman correlation between the two rankings.
+5. **If they correlate: record the number, it's a slide, proceed to the full sweep. If they
+   don't: stop and report before running the full sweep** — the proxy isn't justified and
+   4,728 perplexity deltas would be measuring the wrong thing.
+
 For each tensor `t` in the 197, and each candidate bit-width `b ∈ {2, 3, 4, 5, 6, 8}`:
 1. Fake-quantize **only** `t` to `b` bits (quantize → dequantize back to fp16 in-place). Everything
    else stays fp16.
-2. Evaluate on the domain calibration set.
-3. Record `Δquality` and `bytes_saved`.
+2. Evaluate perplexity on the domain's held-out text (not the calibration set — see below).
+3. **Assert bitwise equality of every other tensor against a pristine fp16 copy, every
+   iteration, not sampled** (spec amendment, pre-flight check 1). Accumulated quantization
+   damage across the sweep from an incomplete restore is silent and corrupts every measurement
+   downstream of the first occurrence — this is the cheapest possible check against the most
+   expensive possible failure mode.
+4. Record `Δppl` and `bytes_saved`, checkpointed incrementally (see pre-flight below).
 Fake quantization is ~30 lines of PyTorch. Do not fight real kernels at this stage — the sweep is
 about *ranking*, and a quant-dequant round trip has the same numerics as the real thing.
 **Grouping:** per-channel groups of 128 along the input dimension, asymmetric (scale + zero point).
 Group size is a config knob; 128 is the default.
-**Domains** (four calibration sets, ~128 samples each, ~2048 tokens per sample):
-| Domain | Calibration source | Eval metric |
+
+**Calibration source vs. held-out eval text — deliberately different data (spec amendment,
+generalizing the distinction the original table only stated for `chat`):**
+| Domain | Calibration source (what gets fake-quantized against) | Held-out text (what ppl is measured on) |
 |---|---|---|
-| `chat` | LMSYS-style multi-turn or OpenAssistant | WikiText-2 perplexity |
-| `code` | The Stack (Python subset) or CodeAlpaca | HumanEval subset, pass@1 |
-| `math` | GSM8K train split | GSM8K test subset, exact match |
-| `summ` | CNN/DailyMail | ROUGE-L or perplexity on held-out |
+| `chat` | OpenAssistant | WikiText-2 (`Salesforce/wikitext`, `wikitext-2-raw-v1`, test split — same set as the M0 baseline) |
+| `code` | The Stack (Python subset), first N samples of `train` | The Stack, next disjoint N samples of `train` |
+| `math` | GSM8K `train` split | GSM8K `test` split |
+| `summ` | CNN/DailyMail `train` split | CNN/DailyMail `validation` split |
+Confirmation-metric sources (used once, post-M2, not per sweep iteration): HumanEval (code),
+GSM8K test subset (math) — same GSM8K test split as the held-out ppl set, since exact-match and
+perplexity aren't in tension the way calibration-vs-eval leakage would be.
+
 **Cost:** 197 tensors × 6 widths × 4 domains = 4,728 evaluations. Each is a forward pass over the
-calibration set on a ~1.7B model — seconds on a GPU. Parallelize across tensors; this can run
+held-out set on a ~1.7B model — seconds on a GPU. Parallelize across tensors; this can run
 unattended overnight. **Start this early.** It is the long pole and it is embarrassingly parallel.
 
-**Non-negotiable eval config (spec amendment): `enable_thinking=False` for every sweep and eval
-run, asserted in the harness, not just defaulted.** Qwen3 has a hybrid thinking mode; a reasoning
-trace on every one of the 4,728 evaluations would inflate the sweep by orders of magnitude and
-inject variance that swamps the quantization signal you're actually trying to measure. This is a
-chat-template kwarg (`tokenizer.apply_chat_template(..., enable_thinking=False)`), verified present
-on both `Qwen3-1.7B` and `Qwen3-0.6B`'s chat templates — assert it's actually being passed rather
-than trusting a default, since a silent default flip would be a very expensive bug to discover
-after an overnight sweep.
+**Pre-flight checks — all must pass before the long run starts (spec amendment):**
+1. **Weight restoration assertion**, above — every iteration, not sampled.
+2. **Incremental checkpointing.** Write to `sensitivity.parquet` after each evaluation, keyed on
+   `(tensor_name, bits, domain)`. The run must be resumable from partial results — a crash at
+   evaluation 3,000 of 4,728 should cost zero completed work, not restart from scratch.
+3. **Noise floor.** Before trusting any delta as signal: measure one tensor twice at the same
+   bit-width (repeat), and measure one tensor expected to be insensitive (e.g., a late-layer
+   `attn_v`). **If the insensitive tensor's delta sits inside the repeat measurement's
+   run-to-run variance, the held-out sets are too small to resolve real signal — report this
+   and stop**, don't run 4,728 evaluations that can't be trusted.
+4. **Stratified ordering.** Iterate width-major and domain-major, not tensor-major — i.e., the
+   outer loops are `(domain, bits)` and the inner loop is over tensors, not the reverse. This
+   way a partial/interrupted run has *complete slices* (every tensor at some width/domain
+   combos) rather than *fragments* (some tensors done at all widths, others untouched).
+5. **Lock and commit the eval methodology.** Stride, context length (2048), dataset revision
+   (`Salesforce/wikitext`, pinned per M0), tokenizer (`Qwen/Qwen3-1.7B`'s, `enable_thinking`
+   verified off — see below). Record this in the repo (`compiler/sweep_methodology.json`,
+   written alongside `sensitivity.parquet`). **All 4,728 deltas are relative to the 16.7835
+   WikiText-2 baseline (§10 M0) and are invalidated if any of these change** — this is what
+   makes a re-run six months from now comparable to today's, or tells you honestly that it
+   isn't.
+
+**Non-negotiable eval config: `enable_thinking=False` for every sweep and eval run, asserted in
+the harness, not just defaulted.** Qwen3 has a hybrid thinking mode; a reasoning trace on every
+one of the 4,728 evaluations would inflate the sweep by orders of magnitude and inject variance
+that swamps the quantization signal you're actually trying to measure. This is a chat-template
+kwarg (`tokenizer.apply_chat_template(..., enable_thinking=False)`), verified present on both
+`Qwen3-1.7B` and `Qwen3-0.6B`'s chat templates — assert it's actually being passed rather than
+trusting a default, since a silent default flip would be a very expensive bug to discover after
+an overnight sweep. (Note: the sweep's perplexity measurement is a forward pass over raw text,
+not a chat completion, so `enable_thinking` doesn't directly apply to the 4,728 ppl evaluations
+themselves — it matters for the confirmation-metric and proxy-validation generative evals, which
+do go through the chat template.)
+
+**On the M0 baseline (16.7835) and cross-tokenizer comparison (spec amendment):** this is higher
+than published perplexities for similarly-sized Llama-family models. Expected, not a bug —
+Qwen's 151,936-token vocabulary yields fewer tokens per word than Llama's ~32K vocabulary, and
+per-token perplexity rises as vocabulary grows (more plausible next-tokens to spread probability
+mass over). **Never compare perplexity across tokenizer families in any output or figure.** The
+`Qwen2.5` secondary validation run (§13) *is* directly comparable to the Qwen3 numbers — same
+151,936-token vocabulary — and that comparison should be made explicitly; a Qwen3-vs-Llama
+comparison should not appear anywhere in the deck.
 
 **Output:** `sensitivity.parquet`
 ```
-tensor_name, domain, bits, delta_ppl, delta_task_metric, bytes_at_bits, bytes_saved_vs_fp16
+tensor_name, domain, bits, delta_ppl, bytes_at_bits, bytes_saved_vs_fp16
 ```
+(`delta_task_metric` removed from the per-row schema — task metrics are now a separate,
+much smaller table produced by the confirmation-metric step in §4.2, keyed on manifest/profile,
+not on individual tensor.)
 ### 4.2 Allocator
 Given `(domain, budget_bytes)`, choose a bit-width per tensor minimizing total damage subject to
 total bytes ≤ budget.
@@ -342,6 +419,19 @@ Guardrails the allocator must respect:
 ```
 Manifests are ~3–5 KB of JSON. Generate the full grid: 4 domains × 4 budget tiers = 16 manifests,
 plus uniform baselines for comparison.
+
+**Confirmation metric (spec amendment, §4.1): the manifest's `eval` block (`wikitext_ppl`,
+`humaneval_pass1` above) is populated once per manifest, after M2 produces it** — not
+accumulated from the sweep. ~16 manifests × ~1-2 confirmation evals each ≈ the "~20 evaluations
+total" figure in §4.1. This is the only place HumanEval/GSM8K generative evaluation happens in
+this milestone.
+
+**M2 status (spec amendment — do not overclaim this milestone):** "beats uniform quantization on
+synthetic sensitivity data" is not validation. A knapsack allocator beats uniform allocation on
+*any* synthetic sensitivity data with per-tensor variance — that's a property of the optimization
+problem, not evidence the allocator is doing anything useful on real damage numbers. **M2 stays
+marked scaffolded, not validated, until it runs against real `sensitivity.parquet` output from
+M1** and the confirmation metrics above are measured on the manifests it actually produces.
 ### 4.3 The result that matters
 Compute the **rank correlation between domain sensitivity orderings** (Spearman, code vs math vs
 chat). If that correlation is low, task-conditioned allocation is justified and you have a genuine

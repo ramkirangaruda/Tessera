@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from compiler.calib import assert_thinking_disabled, render_chat_prompt
+from compiler.calib import assert_thinking_disabled, render_chat_prompt, spearman_correlation
 
 
 class FakeQwen3Tokenizer:
@@ -88,3 +88,25 @@ def test_render_chat_prompt_omits_kwarg_for_non_thinking_model():
     result = render_chat_prompt(tok, [{"role": "user", "content": "hi"}])
     assert result == "rendered"
     assert tok.last_kwargs == {}
+
+
+def test_spearman_correlation_perfect_agreement():
+    a = [1, 2, 3, 4, 5]
+    b = [10, 20, 30, 40, 50]
+    assert spearman_correlation(a, b) == pytest.approx(1.0)
+
+
+def test_spearman_correlation_perfect_disagreement():
+    a = [1, 2, 3, 4, 5]
+    b = [5, 4, 3, 2, 1]
+    assert spearman_correlation(a, b) == pytest.approx(-1.0)
+
+
+def test_spearman_correlation_no_relationship():
+    # a constant b has no rank variance at all -> undefined/NaN correlation is the correct
+    # scipy behavior; anything with real rank variance and no relationship should be far from 1.
+    a = [1, 5, 2, 4, 3]
+    b = [3, 3, 3, 3, 3]
+    import math
+
+    assert math.isnan(spearman_correlation(a, b))
