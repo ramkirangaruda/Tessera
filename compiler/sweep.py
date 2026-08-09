@@ -331,8 +331,8 @@ def run_noise_floor_check(
 def run_proxy_validation(
     model_name: str,
     group_size: int = 128,
-    n_problems: int = 8,
-    domain: str = "math",
+    n_problems: int = 50,
+    domain: str = "general",
     num_fewshot: int = 2,
     device: Optional[str] = None,
     checkpoint_path: Optional[str] = None,
@@ -342,26 +342,31 @@ def run_proxy_validation(
     both delta-ppl and delta-task-metric — ~30 evaluations total. Returns the Spearman
     correlation between the two rankings.
 
-    **Domain is `math`/GSM8K exact-match by default, not `code`/HumanEval pass@1 (deviation from
-    the spec's original framing) — HuggingFace `evaluate`'s `code_eval` metric, which HumanEval
-    depends on, hard-refuses to run on Windows (`NotImplementedError: This metric is currently
-    not supported on Windows`, confirmed directly against this dev environment).** GSM8K tests
-    the identical question (does ppl predict downstream task quality) without needing code
-    execution. This also means the confirmation-metric step (§4.2) can't score code-domain
-    manifests on this machine either — needs WSL/Linux/CI before that step runs for real.
+    **Domain is `general`/HellaSwag accuracy by default — two levels of deviation from the
+    spec's original `code`/HumanEval pass@1 framing, both forced by real constraints hit while
+    actually running this, not chosen for convenience:**
+    1. `code`/HumanEval is out: HuggingFace `evaluate`'s `code_eval` metric hard-refuses to run
+       on Windows (`NotImplementedError`, confirmed directly). Tried `math`/GSM8K instead.
+    2. `math`/GSM8K (generative, exact-match) is *also* out for this specific step: 0-shot
+       floored at exactly 0.0000 on every one of 6 completed tensors before a run crashed
+       (answer-formatting failure, not a damage measurement — GSM8K's exact-match scorer needs
+       few-shot examples to establish the "#### <number>" format). 2-shot still floored at
+       0.0000 baseline. And even fixed, GSM8K is generative (~30-50s/problem) — 15 tensors x 2
+       (ppl+metric) would take hours for a *pre-flight* check.
+    `general`/HellaSwag (log-likelihood scored — a single forward pass per candidate, no
+    autoregressive generation) fixes both: no code execution, and measured ~11s of actual
+    inference for 20 problems (dataset load/mapping is a one-time per-process cost, not
+    per-tensor). Not domain-matched to code/math specifically, but proxy validation's actual
+    question — "does ppl predict *some* real downstream task quality" — doesn't require it to be.
+    `domain="code"` (HumanEval) and `domain="math"` (GSM8K, `num_fewshot` applies) remain
+    available for a Linux/CI environment where the code_eval block doesn't apply and the longer
+    runtime is acceptable.
 
-    `num_fewshot` defaults to 2, not 0 — a first attempt at 0-shot GSM8K showed EXACTLY 0.0000
-    delta on every one of 6 completed tensors before a run crashed. Zero-shot exact-match with no
-    few-shot examples establishing the expected "#### <number>" answer format tends to floor at
-    ~0% regardless of quantization damage — that's an answer-formatting failure, not a signal
-    measurement. 2-shot is enough to establish format while staying much faster than the task's
-    5-shot default.
-
-    Incremental checkpointing (JSONL, same pattern as run_sweep) — this function does real GPU
-    work for an extended period and a previous attempt crashed with a CUDA illegal-memory-access
-    error partway through (cause not fully diagnosed; possibly resource buildup from repeated
-    HFLM construction inside evaluate_task_metric). A checkpoint means a crash costs the
-    in-flight tensor's work, not the whole run's.
+    Incremental checkpointing (JSONL, same pattern as run_sweep) — an earlier GSM8K-based attempt
+    crashed with a CUDA illegal-memory-access error partway through (cause not fully diagnosed;
+    possibly resource buildup from repeated HFLM construction inside evaluate_task_metric). Kept
+    here even though HellaSwag is much faster, since the cause of that crash isn't confirmed
+    fixed — a checkpoint means a recurrence costs the in-flight tensor's work, not the whole run.
 
     Sign convention: damage should INCREASE ppl (positive delta_ppl) and DECREASE the task
     metric (negative delta_metric) for the same sensitive tensors, so a real relationship shows
@@ -374,6 +379,8 @@ def run_proxy_validation(
 
     from compiler.calib import assert_thinking_disabled, load_domain_held_out_ppl_set, perplexity, spearman_correlation
 
+    ppl_domain = domain if domain in ("chat", "code", "math", "summ") else "chat"
+
     if domain == "code":
         from eval.harness import evaluate_humaneval_pass1 as evaluate_task_metric
     elif domain == "math":
@@ -381,8 +388,10 @@ def run_proxy_validation(
 
         def evaluate_task_metric(model, tok, n_problems):
             return _eval_gsm8k(model, tok, n_problems=n_problems, num_fewshot=num_fewshot)
+    elif domain == "general":
+        from eval.harness import evaluate_hellaswag_acc as evaluate_task_metric
     else:
-        raise ValueError(f"proxy validation needs a generative task metric; no support for domain {domain!r}")
+        raise ValueError(f"proxy validation needs a generative/loglikelihood task metric; no support for domain {domain!r}")
 
     def _cleanup():
         # defensive against the resource buildup that may have contributed to the earlier crash
@@ -408,7 +417,7 @@ def run_proxy_validation(
     model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16).to(device)
     model.eval()
 
-    held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set(domain, tok)]
+    held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set(ppl_domain, tok)]
     state = dict(model.named_parameters())
 
     baseline_ppl = perplexity(model, held_out)
@@ -447,6 +456,7 @@ def run_proxy_validation(
     rho = spearman_correlation(ppl_deltas, metric_deltas)
     return {
         "domain": domain,
+        "ppl_domain": ppl_domain,
         "tensor_names": tensor_names,
         "delta_ppl": ppl_deltas,
         "delta_metric": metric_deltas,
@@ -565,9 +575,10 @@ def main() -> None:
     nf.add_argument("--model", default="Qwen/Qwen3-1.7B")
     nf.add_argument("--domain", default="chat", choices=list(DOMAINS))
 
-    pv = sub.add_parser("proxy-validation", help="pre-flight: does delta-ppl predict delta-pass@1?")
+    pv = sub.add_parser("proxy-validation", help="pre-flight: does delta-ppl predict delta-task-metric?")
     pv.add_argument("--model", default="Qwen/Qwen3-1.7B")
-    pv.add_argument("--n-problems", type=int, default=20)
+    pv.add_argument("--n-problems", type=int, default=50)
+    pv.add_argument("--domain", default="general", choices=["general", "code", "math"])
 
     run = sub.add_parser("run", help="the full 4,728-evaluation sweep")
     run.add_argument("--model", default="Qwen/Qwen3-1.7B")
@@ -581,7 +592,7 @@ def main() -> None:
         result = run_noise_floor_check(args.model, domain=args.domain)
         print(json.dumps(result, indent=2))
     elif args.cmd == "proxy-validation":
-        result = run_proxy_validation(args.model, n_problems=args.n_problems)
+        result = run_proxy_validation(args.model, n_problems=args.n_problems, domain=args.domain)
         print(json.dumps({k: v for k, v in result.items()}, indent=2))
     elif args.cmd == "run":
         run_sweep(args.model, args.domains, args.out, args.group_size, checkpoint_path=args.checkpoint)

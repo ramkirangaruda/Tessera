@@ -69,9 +69,14 @@ def evaluate_humaneval_pass1(model, tokenizer, n_problems: int = 40) -> float:
 
 
 def evaluate_gsm8k_exact_match(model, tokenizer, n_problems: int = 100, num_fewshot: Optional[int] = None) -> float:
-    """`num_fewshot` overrides gsm8k.yaml's default (5) — the proxy validation step (compiler/
-    sweep.py) passes 0 for speed, since it only needs deltas comparable *within* the same
-    zero-shot setup across tensors, not an absolute 5-shot benchmark number."""
+    """`num_fewshot` overrides gsm8k.yaml's default (5). Note (spec §4.1 amendment): 0-shot
+    GSM8K floors at exactly 0% regardless of quantization damage — the exact-match scorer needs
+    few-shot examples to establish the "#### <number>" answer format; without them the model's
+    raw completions rarely parse at all, which looks like "0% accuracy" but is actually an
+    answer-formatting failure. This is generative + code-free, but slow (~30-50s/problem) and,
+    at small `n_problems`, chunky (each problem is a full 1/n_problems step) — proxy validation
+    (compiler/sweep.py) ended up switching to evaluate_hellaswag_acc for that reason; this
+    function is still what the confirmation-metric step (§4.2) uses for math-domain manifests."""
     from compiler.calib import assert_thinking_disabled
 
     assert_thinking_disabled(tokenizer)
@@ -94,6 +99,43 @@ def evaluate_gsm8k_exact_match(model, tokenizer, n_problems: int = 100, num_fews
     key = next((k for k in task_results if k.startswith("exact_match")), None)
     if key is None:
         raise KeyError(f"no exact_match key in gsm8k results: {list(task_results)}")
+    return task_results[key]
+
+
+def evaluate_hellaswag_acc(model, tokenizer, n_problems: int = 100) -> float:
+    """HellaSwag accuracy (commonsense sentence-completion, 4-way multiple choice) — a
+    log-likelihood-scored task, not a generative one: for each problem, lm-eval scores each
+    candidate continuation with a single forward pass and picks the highest-probability one, no
+    autoregressive generation at all. This makes it dramatically faster than GSM8K/HumanEval
+    (seconds, not tens of seconds, per problem) and gives a continuous-valued signal (accuracy
+    over many discrete right/wrong problems, not floored by generation-format failures the way
+    0-shot GSM8K was — spec §4.1 amendment).
+
+    Used by compiler/sweep.py's proxy validation as a fast, domain-agnostic stand-in for a
+    generative task metric, after GSM8K proved too slow (~30-50s/problem) and, at small
+    `n_problems`, too floored (0-shot: exact 0% baseline, an answer-formatting failure not a
+    quality measurement) to validate 15 tensors in a reasonable pre-flight window. Not
+    domain-specific like HumanEval/GSM8K — the point here is only "does ppl predict *some* real
+    downstream task quality," which HellaSwag answers just as validly as a domain-matched task
+    would, for cheap."""
+    from compiler.calib import assert_thinking_disabled
+
+    assert_thinking_disabled(tokenizer)
+    import lm_eval
+
+    results = lm_eval.simple_evaluate(
+        model="hf",
+        model_args={"pretrained": model, "enable_thinking": False},
+        tasks=["hellaswag"],
+        limit=n_problems,
+    )
+    task_results = results["results"]["hellaswag"]
+    for key in ("acc_norm,none", "acc,none"):
+        if key in task_results:
+            return task_results[key]
+    key = next((k for k in task_results if k.startswith("acc")), None)
+    if key is None:
+        raise KeyError(f"no acc key in hellaswag results: {list(task_results)}")
     return task_results[key]
 
 
