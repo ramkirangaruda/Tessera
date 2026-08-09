@@ -333,12 +333,14 @@ def run_proxy_validation(
     group_size: int = 128,
     n_problems: int = 8,
     domain: str = "math",
+    num_fewshot: int = 2,
     device: Optional[str] = None,
+    checkpoint_path: Optional[str] = None,
 ) -> dict:
     """Proxy validation (spec §4.1) — run before the full sweep. 15 stratified tensors
     (select_stratified_tensor_sample), each fake-quantized at PROXY_VALIDATION_BITS, measuring
-    both delta-ppl and delta-task-metric (~20 problems each) — ~30 evaluations total. Returns
-    the Spearman correlation between the two rankings.
+    both delta-ppl and delta-task-metric — ~30 evaluations total. Returns the Spearman
+    correlation between the two rankings.
 
     **Domain is `math`/GSM8K exact-match by default, not `code`/HumanEval pass@1 (deviation from
     the spec's original framing) — HuggingFace `evaluate`'s `code_eval` metric, which HumanEval
@@ -348,10 +350,25 @@ def run_proxy_validation(
     execution. This also means the confirmation-metric step (§4.2) can't score code-domain
     manifests on this machine either — needs WSL/Linux/CI before that step runs for real.
 
+    `num_fewshot` defaults to 2, not 0 — a first attempt at 0-shot GSM8K showed EXACTLY 0.0000
+    delta on every one of 6 completed tensors before a run crashed. Zero-shot exact-match with no
+    few-shot examples establishing the expected "#### <number>" answer format tends to floor at
+    ~0% regardless of quantization damage — that's an answer-formatting failure, not a signal
+    measurement. 2-shot is enough to establish format while staying much faster than the task's
+    5-shot default.
+
+    Incremental checkpointing (JSONL, same pattern as run_sweep) — this function does real GPU
+    work for an extended period and a previous attempt crashed with a CUDA illegal-memory-access
+    error partway through (cause not fully diagnosed; possibly resource buildup from repeated
+    HFLM construction inside evaluate_task_metric). A checkpoint means a crash costs the
+    in-flight tensor's work, not the whole run's.
+
     Sign convention: damage should INCREASE ppl (positive delta_ppl) and DECREASE the task
     metric (negative delta_metric) for the same sensitive tensors, so a real relationship shows
     up as a NEGATIVE Spearman correlation. |rho| close to 1 (negative) = proxy justified. Near 0
     = stop, the sweep would be measuring the wrong thing."""
+    import gc
+
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -363,13 +380,29 @@ def run_proxy_validation(
         from eval.harness import evaluate_gsm8k_exact_match as _eval_gsm8k
 
         def evaluate_task_metric(model, tok, n_problems):
-            # num_fewshot=0 for speed — proxy validation only needs deltas comparable *within*
-            # this run's setup, not an absolute 5-shot benchmark number (spec §4.1 amendment).
-            return _eval_gsm8k(model, tok, n_problems=n_problems, num_fewshot=0)
+            return _eval_gsm8k(model, tok, n_problems=n_problems, num_fewshot=num_fewshot)
     else:
         raise ValueError(f"proxy validation needs a generative task metric; no support for domain {domain!r}")
 
+    def _cleanup():
+        # defensive against the resource buildup that may have contributed to the earlier crash
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint_path = checkpoint_path or "compiler/proxy_validation.checkpoint.jsonl"
+
+    checkpoint_rows: Dict[str, dict] = {}
+    if Path(checkpoint_path).exists():
+        for line in Path(checkpoint_path).read_text().splitlines():
+            line = line.strip()
+            if line:
+                row = json.loads(line)
+                checkpoint_rows[row["tensor_name"]] = row
+        if checkpoint_rows:
+            print(f"resuming: {len(checkpoint_rows)} tensors already checkpointed", flush=True)
+
     tok = AutoTokenizer.from_pretrained(model_name)
     assert_thinking_disabled(tok)
     model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16).to(device)
@@ -380,11 +413,14 @@ def run_proxy_validation(
 
     baseline_ppl = perplexity(model, held_out)
     baseline_metric = evaluate_task_metric(model, tok, n_problems=n_problems)
+    _cleanup()
+    print(f"baseline: ppl={baseline_ppl:.4f} metric={baseline_metric:.4f}", flush=True)
 
     tensor_names = select_stratified_tensor_sample()
-    ppl_deltas: List[float] = []
-    metric_deltas: List[float] = []
     for tensor_name in tensor_names:
+        if tensor_name in checkpoint_rows:
+            continue
+
         param = get_param(state, tensor_name)
         original = param.detach().clone()
         w_hat = fake_quantize_tensor(original.float().cpu().numpy(), PROXY_VALIDATION_BITS, group_size)
@@ -393,15 +429,21 @@ def run_proxy_validation(
 
         ppl = perplexity(model, held_out)
         metric = evaluate_task_metric(model, tok, n_problems=n_problems)
+        _cleanup()
 
         restore_and_assert(param, original)
 
         d_ppl = ppl - baseline_ppl
         d_metric = metric - baseline_metric
-        ppl_deltas.append(d_ppl)
-        metric_deltas.append(d_metric)
+        row = {"tensor_name": tensor_name, "delta_ppl": d_ppl, "delta_metric": d_metric}
+        checkpoint_rows[tensor_name] = row
+        with open(checkpoint_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+            f.flush()
         print(f"  {tensor_name}: delta_ppl={d_ppl:+.4f} delta_metric={d_metric:+.4f}", flush=True)
 
+    ppl_deltas = [checkpoint_rows[t]["delta_ppl"] for t in tensor_names]
+    metric_deltas = [checkpoint_rows[t]["delta_metric"] for t in tensor_names]
     rho = spearman_correlation(ppl_deltas, metric_deltas)
     return {
         "domain": domain,
@@ -410,6 +452,7 @@ def run_proxy_validation(
         "delta_metric": metric_deltas,
         "spearman": rho,
         "n_problems": n_problems,
+        "num_fewshot": num_fewshot,
         "bits": PROXY_VALIDATION_BITS,
         "baseline_ppl": baseline_ppl,
         "baseline_metric": baseline_metric,
