@@ -16,6 +16,7 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass
@@ -50,30 +51,50 @@ def evaluate_humaneval_pass1(model, tokenizer, n_problems: int = 40) -> float:
 
     results = lm_eval.simple_evaluate(
         model="hf",
-        model_args={"pretrained": model},
+        model_args={"pretrained": model, "enable_thinking": False},
         tasks=["humaneval"],
         limit=n_problems,
         apply_chat_template=True,
-        chat_template_args={"enable_thinking": False},
+        confirm_run_unsafe_code=True,
     )
-    return results["results"]["humaneval"]["pass@1"]
+    # NOTE: exact result key unverified on this dev environment — HuggingFace `evaluate`'s
+    # code_eval metric, which this task depends on, refuses to run on Windows at all
+    # (NotImplementedError, confirmed directly). Confirm this key on Linux/WSL/CI before relying
+    # on it; humaneval.yaml's filter is named "create_test", so it's likely "pass@1,create_test".
+    task_results = results["results"]["humaneval"]
+    key = next((k for k in task_results if k.startswith("pass@1")), None)
+    if key is None:
+        raise KeyError(f"no pass@1 key in humaneval results: {list(task_results)}")
+    return task_results[key]
 
 
-def evaluate_gsm8k_exact_match(model, tokenizer, n_problems: int = 100) -> float:
+def evaluate_gsm8k_exact_match(model, tokenizer, n_problems: int = 100, num_fewshot: Optional[int] = None) -> float:
+    """`num_fewshot` overrides gsm8k.yaml's default (5) — the proxy validation step (compiler/
+    sweep.py) passes 0 for speed, since it only needs deltas comparable *within* the same
+    zero-shot setup across tensors, not an absolute 5-shot benchmark number."""
     from compiler.calib import assert_thinking_disabled
 
     assert_thinking_disabled(tokenizer)
     import lm_eval
 
+    kwargs = {} if num_fewshot is None else {"num_fewshot": num_fewshot}
     results = lm_eval.simple_evaluate(
         model="hf",
-        model_args={"pretrained": model},
+        model_args={"pretrained": model, "enable_thinking": False},
         tasks=["gsm8k"],
         limit=n_problems,
         apply_chat_template=True,
-        chat_template_args={"enable_thinking": False},
+        **kwargs,
     )
-    return results["results"]["gsm8k"]["exact_match"]
+    # gsm8k.yaml defines two filters (strict-match, flexible-extract); prefer the stricter one.
+    task_results = results["results"]["gsm8k"]
+    for key in ("exact_match,strict-match", "exact_match,flexible-extract"):
+        if key in task_results:
+            return task_results[key]
+    key = next((k for k in task_results if k.startswith("exact_match")), None)
+    if key is None:
+        raise KeyError(f"no exact_match key in gsm8k results: {list(task_results)}")
+    return task_results[key]
 
 
 def run_baseline_reproducibility_check(model_name: str, n_runs: int = 2) -> bool:

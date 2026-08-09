@@ -583,6 +583,70 @@ being meaningful or not (see §10), and on the Pi Zero's ~350 MB survival tier i
 all. **PyTorch remains the laptop backend** (better iteration speed during development, budget is
 roomy enough that the tax doesn't matter); **ggml/llama.cpp is required on both Pi tiers.**
 
+### ggml/llama.cpp feasibility — go/no-go (spec amendment, investigated before M1 launch)
+
+**GO on llama.cpp as the memory-reduction mechanism — verified empirically, not just read about:**
+- Qwen3 dense architecture is well-supported (Qwen's own docs cover it; `Qwen/Qwen3-1.7B-GGUF`
+  and multiple community conversions — `bartowski`, `unsloth`, `ggml-org` — exist and load).
+- **Real memory reduction, measured on this machine:** a Q4_K_M GGUF (1223 MiB on disk) loaded
+  via `llama-cpp-python` used **1614 MiB RSS** (1597 MiB delta from process baseline) — CPU-only,
+  no GPU. Compare to the PyTorch path's fixed ~3.3 GB RSS regardless of the manifest's chosen
+  bit-width (measured earlier this session, spec §9 "no longer a stretch goal" paragraph above)
+  — this is the actual problem ggml was required to solve, and it does.
+- **Fast, on CPU alone:** 1.60 s cold load, 20.4 tok/s generation. Both comfortably clear the M3/
+  M4 budgets even before considering GPU acceleration or the target ARM hardware specifically.
+- **Windows install gotcha (minor, worth recording):** `pip install llama-cpp-python` has no
+  prebuilt wheel for this platform and falls back to a source build of the vendored llama.cpp
+  tree, which fails on Windows' MAX_PATH limit (a deeply-nested `tools/ui/src/...` path inside
+  the vendored source). Fixed by installing from the maintainer's prebuilt wheel index instead
+  (`--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`, or `/cu124` etc. for
+  CUDA). Not a blocker, just don't `pip install` it the default way and wonder why it fails.
+- **Thinking-mode gotcha (needs a parallel fix, not yet done):** `llama-cpp-python`'s
+  `create_chat_completion` does not suppress Qwen3's thinking mode by default — the test
+  generation above came back with an open `<think>` block. Needs the same treatment
+  `compiler/calib.assert_thinking_disabled`/`render_chat_prompt` already give the transformers
+  path, adapted to whatever `llama-cpp-python` (or a raw llama.cpp CLI invocation) exposes for
+  this — not yet implemented.
+
+**NO-GO on llama.cpp as a drop-in replacement for the nested `.tsra` runtime — real architectural
+conflict, needs a decision, not something to paper over:**
+
+GGUF is **fixed-precision per file**, produced by a one-time `quantize` step from a high-
+precision source. Confirmed directly: `bartowski/Qwen_Qwen3-1.7B-GGUF` ships **24 separate
+`.gguf` files**, one per quant type (`Q2_K` through `Q8_0`, `bf16`, the `IQ*`/`K_L`/`K_S`/`K_M`
+variants); the official `Qwen/Qwen3-1.7B-GGUF` ships exactly **one** (`Q8_0`). There is no
+mechanism in the format for reading a partial range of one file at a lower bit-width — switching
+precision means loading a *different file*, not adjusting an mmap range. This is the exact
+pattern spec §14's prior-art table already contrasts Tessera against: *"llama.cpp K-quants —
+hand-tuned mixed precision, one file per width."* Adopting GGUF as the production backend means
+adopting that pattern for real, which directly conflicts with:
+- **Thesis claim 3** (spec §1): *"switching precision is an mmap range change, not a
+  re-quantization."* True for "not a re-quantization" (GGUF files are pre-quantized once, matching
+  what the allocator decided — no re-quantization at runtime). **Not true for "mmap range
+  change"** — a precision switch on the ggml path is a file swap and a reload.
+- **Runtime bit-plane drop** (spec §5.3, §9 stretch goal 3): "release the tail planes and keep
+  generating" has no GGUF equivalent. There is nothing to release from a fixed-precision file.
+- **The Pi 5 demo's step 3** (spec §12, written in the previous amendment): "same device, same
+  artifact, weights visibly shrink live... no reload" is the exact claim a GGUF-backed runtime
+  cannot make.
+
+**Recommended resolution (not yet applied — flagging for a decision before touching §12's demo
+script or §1's claim wording):** split the runtime by what each backend is actually good at.
+- **ggml/llama.cpp**: the production path for *static* per-session loads on Pi 5/Pi Zero —
+  pre-bake one GGUF per manifest in the grid (spec §4.2: 16 manifests already; 16 GGUF files is
+  the same shape of artifact set, not a new one), matched to the allocator's actual per-tensor
+  bit-widths as closely as GGUF's quant types allow. This is where the real M4 RSS win lives.
+- **The `.tsra` nested runtime** (this repo's own format + a hand-rolled dequant path, already
+  built): kept specifically for the demo moments that need genuine live adjustment without a
+  reload — Pi 5 step 3's long-context weight shrink, and the bit-plane-drop stretch goal. Slower
+  and heavier than ggml, but it's the only one of the two that can do this.
+- Net effect on the pitch: claim 3 becomes *"the nested format enables live, no-reload precision
+  adjustment where the demo needs it; the production path for static loads uses the fastest
+  available backend per device"* — narrower than the original unqualified claim, but still real
+  and still differentiated from GGUF/K-quants. **This is a framing change to a claim already
+  written into the pitch deck outline (docs/pitch.md) and demo script (docs/demo-script.md) — it
+  needs sign-off before those documents change, not a unilateral rewrite.**
+
 **Recorded but not building (future work, spec amendment):** per-expert bit allocation for MoE
 models. Routing frequency confounds sensitivity measurement the same way it did for the rejected
 Qwen3.5 hybrid option (§2) — a rarely-routed expert looks insensitive in a sweep that never

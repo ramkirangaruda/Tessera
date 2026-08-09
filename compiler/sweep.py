@@ -244,15 +244,24 @@ def run_noise_floor_check(
     bits: int = PROXY_VALIDATION_BITS,
     device: Optional[str] = None,
 ) -> dict:
-    """Pre-flight check 3 (spec §4.1). Two measurements:
-    1. Repeat: fake-quantize `repeat_tensor` once, measure ppl on the SAME held-out set TWICE
-       (no requantization between) — isolates pure run-to-run noise (GPU reduction-order
-       nondeterminism), independent of quantization at all.
-    2. Insensitive: fake-quantize `insensitive_tensor` (expected low-impact) once, measure its
-       single delta-ppl.
-    If |insensitive delta| sits inside the repeat measurement's noise floor, the held-out set is
-    too small to resolve real signal from this tensor — the caller should stop, not proceed to
-    the full sweep. Does its own weight restoration + bitwise assertion (spec §4.1 check 1)."""
+    """Pre-flight check 3 (spec §4.1). Two complementary measurements:
+
+    1. **Determinism check**: fake-quantize `repeat_tensor` once, measure ppl on the *identical*
+       held-out set twice with no requantization between. Confirms the pipeline is deterministic
+       (this repo's measured result: it is — 0.0 difference). This is necessary but NOT
+       sufficient for the real question, since a deterministic pipeline trivially reproduces
+       itself regardless of whether the held-out set is big enough to resolve real signal —
+       repeating the same fixed data can never surface a "too small a sample" problem.
+    2. **Split-half noise floor** (the actual gate): with `repeat_tensor` still quantized, split
+       the held-out set into two disjoint halves and measure delta-ppl on each half separately.
+       The spread between the two halves' deltas *is* the real noise floor — it answers "if I'd
+       drawn a different, equally-sized held-out sample, how much would my delta estimate move."
+       `insensitive_tensor`'s delta (measured on the full set) is then compared against this
+       split-half spread, not against the (always ~0) repeat spread.
+
+    If |insensitive delta| sits inside the split-half noise floor, the held-out set is too small
+    to resolve real signal from this tensor — the caller should stop, not proceed to the full
+    sweep. Does its own weight restoration + bitwise assertion (spec §4.1 check 1)."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -264,23 +273,33 @@ def run_noise_floor_check(
     model.eval()
 
     held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set(domain, tok)]
-    state = dict(model.named_parameters())
-    baseline_ppl = perplexity(model, held_out)
+    mid = len(held_out) // 2
+    half_a, half_b = held_out[:mid], held_out[mid:]
 
-    # 1. repeat measurement on repeat_tensor
+    state = dict(model.named_parameters())
+    baseline_full = perplexity(model, held_out)
+    baseline_a = perplexity(model, half_a)
+    baseline_b = perplexity(model, half_b)
+
+    # quantize repeat_tensor once; take all measurements against it before restoring
     param = get_param(state, repeat_tensor)
     original = param.detach().clone()
     w_hat = fake_quantize_tensor(original.float().cpu().numpy(), bits, group_size)
     with torch.no_grad():
         param.copy_(torch.from_numpy(w_hat).to(original.dtype))
-    ppl_a = perplexity(model, held_out)
-    ppl_b = perplexity(model, held_out)
-    restore_and_assert(param, original)
-    repeat_delta_a = ppl_a - baseline_ppl
-    repeat_delta_b = ppl_b - baseline_ppl
-    noise_floor = abs(ppl_a - ppl_b)
 
-    # 2. single measurement on insensitive_tensor
+    ppl_full_1 = perplexity(model, held_out)
+    ppl_full_2 = perplexity(model, held_out)  # identical-data repeat -> determinism check
+    ppl_a = perplexity(model, half_a)
+    ppl_b = perplexity(model, half_b)
+    restore_and_assert(param, original)
+
+    determinism_delta = abs(ppl_full_1 - ppl_full_2)
+    delta_a = ppl_a - baseline_a
+    delta_b = ppl_b - baseline_b
+    split_half_noise_floor = abs(delta_a - delta_b)
+
+    # insensitive tensor: single full-set measurement, compared against the split-half floor
     param2 = get_param(state, insensitive_tensor)
     original2 = param2.detach().clone()
     w_hat2 = fake_quantize_tensor(original2.float().cpu().numpy(), bits, group_size)
@@ -288,17 +307,21 @@ def run_noise_floor_check(
         param2.copy_(torch.from_numpy(w_hat2).to(original2.dtype))
     ppl_insensitive = perplexity(model, held_out)
     restore_and_assert(param2, original2)
-    insensitive_delta = ppl_insensitive - baseline_ppl
+    insensitive_delta = ppl_insensitive - baseline_full
 
-    verdict = "STOP — signal below noise floor" if abs(insensitive_delta) <= noise_floor else "PASS"
+    verdict = (
+        "STOP — signal below noise floor" if abs(insensitive_delta) <= split_half_noise_floor else "PASS"
+    )
     return {
         "domain": domain,
         "bits": bits,
-        "baseline_ppl": baseline_ppl,
+        "n_held_out": len(held_out),
+        "baseline_ppl_full": baseline_full,
+        "determinism_delta": determinism_delta,
         "repeat_tensor": repeat_tensor,
-        "repeat_delta_a": repeat_delta_a,
-        "repeat_delta_b": repeat_delta_b,
-        "noise_floor": noise_floor,
+        "repeat_delta_half_a": delta_a,
+        "repeat_delta_half_b": delta_b,
+        "split_half_noise_floor": split_half_noise_floor,
         "insensitive_tensor": insensitive_tensor,
         "insensitive_delta": insensitive_delta,
         "verdict": verdict,
@@ -308,23 +331,43 @@ def run_noise_floor_check(
 def run_proxy_validation(
     model_name: str,
     group_size: int = 128,
-    n_problems: int = 20,
+    n_problems: int = 8,
+    domain: str = "math",
     device: Optional[str] = None,
 ) -> dict:
     """Proxy validation (spec §4.1) — run before the full sweep. 15 stratified tensors
     (select_stratified_tensor_sample), each fake-quantized at PROXY_VALIDATION_BITS, measuring
-    both delta-ppl (code domain held-out text) and delta-pass@1 (HumanEval, ~20 problems each) —
-    ~30 evaluations total. Returns the Spearman correlation between the two rankings.
+    both delta-ppl and delta-task-metric (~20 problems each) — ~30 evaluations total. Returns
+    the Spearman correlation between the two rankings.
 
-    Sign convention: damage should INCREASE ppl (positive delta_ppl) and DECREASE pass@1
-    (negative delta_pass1) for the same sensitive tensors, so a real relationship shows up as a
-    NEGATIVE Spearman correlation. |rho| close to 1 (negative) = proxy justified. Near 0 = stop,
-    the sweep would be measuring the wrong thing."""
+    **Domain is `math`/GSM8K exact-match by default, not `code`/HumanEval pass@1 (deviation from
+    the spec's original framing) — HuggingFace `evaluate`'s `code_eval` metric, which HumanEval
+    depends on, hard-refuses to run on Windows (`NotImplementedError: This metric is currently
+    not supported on Windows`, confirmed directly against this dev environment).** GSM8K tests
+    the identical question (does ppl predict downstream task quality) without needing code
+    execution. This also means the confirmation-metric step (§4.2) can't score code-domain
+    manifests on this machine either — needs WSL/Linux/CI before that step runs for real.
+
+    Sign convention: damage should INCREASE ppl (positive delta_ppl) and DECREASE the task
+    metric (negative delta_metric) for the same sensitive tensors, so a real relationship shows
+    up as a NEGATIVE Spearman correlation. |rho| close to 1 (negative) = proxy justified. Near 0
+    = stop, the sweep would be measuring the wrong thing."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from compiler.calib import assert_thinking_disabled, load_domain_held_out_ppl_set, perplexity, spearman_correlation
-    from eval.harness import evaluate_humaneval_pass1
+
+    if domain == "code":
+        from eval.harness import evaluate_humaneval_pass1 as evaluate_task_metric
+    elif domain == "math":
+        from eval.harness import evaluate_gsm8k_exact_match as _eval_gsm8k
+
+        def evaluate_task_metric(model, tok, n_problems):
+            # num_fewshot=0 for speed — proxy validation only needs deltas comparable *within*
+            # this run's setup, not an absolute 5-shot benchmark number (spec §4.1 amendment).
+            return _eval_gsm8k(model, tok, n_problems=n_problems, num_fewshot=0)
+    else:
+        raise ValueError(f"proxy validation needs a generative task metric; no support for domain {domain!r}")
 
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     tok = AutoTokenizer.from_pretrained(model_name)
@@ -332,15 +375,15 @@ def run_proxy_validation(
     model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16).to(device)
     model.eval()
 
-    held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set("code", tok)]
+    held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set(domain, tok)]
     state = dict(model.named_parameters())
 
     baseline_ppl = perplexity(model, held_out)
-    baseline_pass1 = evaluate_humaneval_pass1(model, tok, n_problems=n_problems)
+    baseline_metric = evaluate_task_metric(model, tok, n_problems=n_problems)
 
     tensor_names = select_stratified_tensor_sample()
     ppl_deltas: List[float] = []
-    pass1_deltas: List[float] = []
+    metric_deltas: List[float] = []
     for tensor_name in tensor_names:
         param = get_param(state, tensor_name)
         original = param.detach().clone()
@@ -349,26 +392,27 @@ def run_proxy_validation(
             param.copy_(torch.from_numpy(w_hat).to(original.dtype))
 
         ppl = perplexity(model, held_out)
-        pass1 = evaluate_humaneval_pass1(model, tok, n_problems=n_problems)
+        metric = evaluate_task_metric(model, tok, n_problems=n_problems)
 
         restore_and_assert(param, original)
 
         d_ppl = ppl - baseline_ppl
-        d_pass1 = pass1 - baseline_pass1
+        d_metric = metric - baseline_metric
         ppl_deltas.append(d_ppl)
-        pass1_deltas.append(d_pass1)
-        print(f"  {tensor_name}: delta_ppl={d_ppl:+.4f} delta_pass1={d_pass1:+.4f}", flush=True)
+        metric_deltas.append(d_metric)
+        print(f"  {tensor_name}: delta_ppl={d_ppl:+.4f} delta_metric={d_metric:+.4f}", flush=True)
 
-    rho = spearman_correlation(ppl_deltas, pass1_deltas)
+    rho = spearman_correlation(ppl_deltas, metric_deltas)
     return {
+        "domain": domain,
         "tensor_names": tensor_names,
         "delta_ppl": ppl_deltas,
-        "delta_pass1": pass1_deltas,
+        "delta_metric": metric_deltas,
         "spearman": rho,
         "n_problems": n_problems,
         "bits": PROXY_VALIDATION_BITS,
         "baseline_ppl": baseline_ppl,
-        "baseline_pass1": baseline_pass1,
+        "baseline_metric": baseline_metric,
     }
 
 

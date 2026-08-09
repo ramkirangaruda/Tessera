@@ -80,8 +80,10 @@ def render_chat_prompt(tokenizer, messages: list, add_generation_prompt: bool = 
 _DATASET_BY_DOMAIN = {
     "chat": ("OpenAssistant/oasst1", None),
     "code": ("bigcode/the-stack-smol", "data/python"),
-    "math": ("gsm8k", "main"),
-    "summ": ("cnn_dailymail", "3.0.0"),
+    # "gsm8k"/"cnn_dailymail" (unnamespaced, script-based) are deprecated on the Hub — same class
+    # of bug already fixed once for "wikitext" -> "Salesforce/wikitext" (spec §4.1 amendment).
+    "math": ("openai/gsm8k", "main"),
+    "summ": ("abisee/cnn_dailymail", "3.0.0"),
 }
 
 
@@ -124,9 +126,9 @@ def load_domain_held_out_ppl_set(
         name, config = _DATASET_BY_DOMAIN["code"]
         ds = load_dataset(name, config, split="train", streaming=True).skip(n_samples)
     elif domain == "math":
-        ds = load_dataset("gsm8k", "main", split="test", streaming=True)
+        ds = load_dataset("openai/gsm8k", "main", split="test", streaming=True)
     elif domain == "summ":
-        ds = load_dataset("cnn_dailymail", "3.0.0", split="validation", streaming=True)
+        ds = load_dataset("abisee/cnn_dailymail", "3.0.0", split="validation", streaming=True)
     else:
         raise ValueError(f"unknown domain: {domain!r}")
 
