@@ -19,39 +19,58 @@ rehearsal checklist and line-by-line narration underneath it. Update as the rig 
       improvised; the crossover only reads as intentional if it isn't visibly padded on stage
 - [ ] Pareto figure (`eval/figures.py::plot_pareto`) pre-generated and on standby in case the
       live dashboard panel misbehaves
+- [ ] **All manifests in the demo grid pre-materialized to GGUF and cached** (spec §9 ggml
+      amendment — single backend, no PyTorch demo moments). Every reload the choreography below
+      calls for should hit a warm cache and complete in ~1.6 s (measured cold-load figure); if
+      any step is doing a cold `.tsra` → GGUF conversion live, that step will stall and the
+      "fast enough nobody notices" framing breaks. Verify the cache is warm as part of setup, not
+      during the walkthrough.
 
 ## Walkthrough
 
-1. **Laptop, dongle in.** Plug in. OLED reads `CODE · 6-bit · ~1.4 GB` (figures illustrative
-   until M4 measures them — see spec §12). Paste the real bug, ask Tessera to debug it. Narrate
-   the heatmap: MLP tensors (mlp_gate/up/down) run richer than attention — but note for Qwen3
-   specifically MLP is only ~75% of per-layer weight, not the ~88% the original Qwen2.5-based
-   scoping assumed (spec §3) — the allocator still spends most of its budget there, just less
-   lopsidedly, so check this actually holds after M1 before saying "88%" on stage.
+**Framing note (spec §1/§9 amendment): this is no longer a "live, no-reload" demo.** Every
+precision or domain switch below is a fast reload (~1.6 s measured) of a different pre-baked GGUF
+materialized from the same `.tsra` artifact — not an in-place mmap adjustment. Narrate it that
+way; don't say "no reload," say "watch how fast."
+
+1. **Laptop, dongle in.** Plug in. OLED reads `CODE · Q6_K · ~1.4 GB` (figures illustrative until
+   M4 measures them — see spec §12; bit-widths now map to the nearest GGUF quant type, e.g. 6-bit
+   → `Q6_K`, not an arbitrary continuous value). Paste the real bug, ask Tessera to debug it.
+   Narrate the heatmap: MLP tensors (mlp_gate/up/down) run richer than attention — but note for
+   Qwen3 specifically MLP is only ~75% of per-layer weight, not the ~88% the original
+   Qwen2.5-based scoping assumed (spec §3) — the allocator still spends most of its budget there,
+   just less lopsidedly, so check this actually holds after M1 before saying "88%" on stage.
 2. **Unplug.** Point at the dashboard: session visibly wipes (`wiped: true`, the zeroize
    confirmation). Say it out loud: "the laptop cannot answer a follow-up right now — nothing of
    the conversation is left on it."
 3. **Into the Pi 5 — same model as the laptop, not a smaller one (spec §3 amendment).** OLED
-   reads `CODE · 8-bit · ~1.7 GB` on resume — say out loud that a 4 GB Pi 5 genuinely isn't
+   reads `CODE · Q8_0 · ~1.7 GB` on resume — say out loud that a 4 GB Pi 5 genuinely isn't
    constrained for this model at rest, so it doesn't demote for no reason. Then paste the
-   prepared long document to push the session to ~32k tokens. Narrate the heatmap redrawing
-   leaner **live** as the KV-cache reservation grows — same artifact, same device, no reload:
-   OLED settles around `CODE · ~7-bit · ~2.4 GB`. Ask a follow-up that only makes sense with the
-   earlier context (reference something specific from step 1's bug). It answers correctly, at
-   the new precision. The line to land: "this isn't a weaker device, it's the same device running
-   out of room because the conversation got long — watch it happen."
-4. **Into the Pi Zero 2W.** OLED reads `CHAT · 3-bit · ~250 MB`. *This* is the device-class swap
-   — deliberately last, so it doesn't get confused with step 3's budget-pressure swap. This is a
-   *different model* (Qwen3-0.6B, not 1.7B) — say so explicitly. Slower, simpler, still coherent,
-   still remembers the session. This is the strongest defense of the transport design (spec §3):
-   the session is a transcript, not a KV cache, so it survives a model swap, not just a precision
-   swap. If asked about headroom on this tier: it's real but thin (~925 tokens of fp16 KV cache
-   after loading the model at 3-bit, spec §3) — KV-cache quantization (now critical path, not a
-   stretch goal) is what makes it comfortable rather than merely possible.
+   prepared long document to push the session to ~32k tokens. The daemon detects the session's
+   KV-cache reservation has outgrown the current profile's headroom and **re-materializes the
+   next profile down from the same `.tsra` artifact — a ~1.6 s reload, not a live shrink.**
+   Narrate the reload, don't hide it: "watch this — the daemon just noticed we're out of room and
+   swapped to a leaner profile, same file, under two seconds." OLED settles around
+   `CODE · ~Q6_K · ~2.4 GB` (bytes now include the KV reservation). Ask a follow-up that only
+   makes sense with the earlier context (reference something specific from step 1's bug) — the
+   reload didn't lose it, because the session lives in the portable bundle (spec §6), not in the
+   old process's memory. It answers correctly, at the new precision. The line to land: "this isn't
+   a weaker device, it's the same device running out of room because the conversation got long —
+   and switching profiles for it is fast enough that it doesn't feel like a hiccup."
+4. **Into the Pi Zero 2W.** OLED reads `CHAT · Q3_K · ~250 MB`. *This* is the device-class swap
+   — deliberately last, so it doesn't get confused with step 3's budget-pressure reload. This is
+   a *different model* (Qwen3-0.6B, not 1.7B) — say so explicitly. Slower, simpler, still
+   coherent, still remembers the session. This is the strongest defense of the transport design
+   (spec §3): the session is a transcript, not a KV cache, so it survives a model swap, not just
+   a precision swap. If asked about headroom on this tier: it's real but thin (~925 tokens of
+   fp16 KV cache after loading the model at 3-bit, spec §3) — KV-cache quantization (now critical
+   path, not a stretch goal) is what makes it comfortable rather than merely possible.
 5. **Ask a math question.** Domain shift detected (or button-toggled, per stretch goal 1 status
-   at the time), manifest hot-swaps to `math`. Same `.tsra` file on disk — narrate that: "no
-   re-download, no re-quantization, we're just reading more planes off the tensors that matter
-   for arithmetic." Heatmap visibly redistributes.
+   at the time) — the daemon reloads the `math` domain's pre-baked profile, materialized from the
+   same `.tsra` artifact the `code` profile came from. Narrate that: "same 1.7 GB file on disk
+   covers every domain and every precision tier — that reload just pulled a different slice of
+   it, not a different download." Heatmap visibly redistributes toward the tensors that matter
+   for arithmetic.
 
 Close on the Pareto plot: every Tessera profile marked above the uniform baseline curve.
 
@@ -69,6 +88,18 @@ Close on the Pareto plot: every Tessera profile marked above the uniform baselin
   device profile, it's live budget pressure from a real 32k-token session competing with the
   weights for the same memory. Have the crossover numbers (~11.2k / ~29.9k tokens) ready if
   pushed on whether that's real or staged.
+- "Wait, didn't you say precision switches were live, no reload?" → that framing changed (spec §1/
+  §9 amendment) once ggml became the required production backend for real memory reduction: GGUF
+  is fixed-precision per *file*, though it does support per-*tensor* type overrides within a file
+  (`llama-quantize --tensor-type`), which is how the allocator's actual per-tensor decisions still
+  deploy unchanged. Precision/domain switches are now fast reloads (~1.6 s measured) of a
+  different pre-baked file materialized from the same `.tsra` artifact — say this straightforwardly
+  if asked; claiming otherwise on stage is the failure mode judges catch fastest.
+- "Why not just run everything on PyTorch, it's simpler?" → spec.md §9: PyTorch carries a fixed
+  ~400-600 MB tax regardless of chosen bit-width, which breaks the RSS criterion on Pi tiers and
+  doesn't reduce memory at all — measured directly (a Q4_K_M GGUF used 1614 MiB RSS; PyTorch used
+  ~3.3 GB regardless of manifest). ggml is required everywhere in the demo for this reason, not
+  just on the Pi tiers as originally scoped.
 
 ## Numbers to have on a slide, not improvised (spec §13)
 

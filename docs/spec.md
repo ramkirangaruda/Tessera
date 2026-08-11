@@ -15,8 +15,15 @@ Tessera claims three things those don't do:
 2. **Bit allocation is device-conditioned.** Allocation is solved against the *actual* free memory
    of the machine the model lands on, at load time.
 3. **One artifact serves every precision.** Weights are stored as nested bit-planes. A 3-bit device
-   and an 8-bit device read the same file — one just stops reading earlier. Switching precision is
-   an mmap range change, not a re-quantization.
+   and an 8-bit device read the same file — one just stops reading earlier. **Reframed from
+   runtime to storage (spec §9 amendment, ggml/GGUF go/no-go):** the production runtime
+   (ggml/llama.cpp, required for real memory reduction — see §9) materializes a given precision
+   from the artifact in under two seconds rather than adjusting an mmap range live; the claim is
+   that one artifact replaces the many-files-per-precision-tier pattern every other quantized
+   format ships (a community GGUF repo ships 24 separate files to cover one model's range), not
+   that switching is instantaneous. Live, no-reload adjustment still exists on the `.tsra`
+   runtime path directly (used for the format's own round-trip guarantees, §5) — it just isn't
+   the production demo path once ggml is the backend.
 And one product claim, which is what makes it demoable:
 4. **Context is portable and leaves no residue.** A hardware dongle carries the session. Any host
    can resume it; on unplug the host wipes its copy.
@@ -583,7 +590,7 @@ being meaningful or not (see §10), and on the Pi Zero's ~350 MB survival tier i
 all. **PyTorch remains the laptop backend** (better iteration speed during development, budget is
 roomy enough that the tax doesn't matter); **ggml/llama.cpp is required on both Pi tiers.**
 
-### ggml/llama.cpp feasibility — go/no-go (spec amendment, investigated before M1 launch)
+### ggml/llama.cpp feasibility — go, single backend, claim reframed (spec amendment)
 
 **GO on llama.cpp as the memory-reduction mechanism — verified empirically, not just read about:**
 - Qwen3 dense architecture is well-supported (Qwen's own docs cover it; `Qwen/Qwen3-1.7B-GGUF`
@@ -608,44 +615,54 @@ roomy enough that the tax doesn't matter); **ggml/llama.cpp is required on both 
   path, adapted to whatever `llama-cpp-python` (or a raw llama.cpp CLI invocation) exposes for
   this — not yet implemented.
 
-**NO-GO on llama.cpp as a drop-in replacement for the nested `.tsra` runtime — real architectural
-conflict, needs a decision, not something to paper over:**
+**The conflict is narrower than first scoped — resolved, not deferred (spec amendment).**
 
-GGUF is **fixed-precision per file**, produced by a one-time `quantize` step from a high-
-precision source. Confirmed directly: `bartowski/Qwen_Qwen3-1.7B-GGUF` ships **24 separate
-`.gguf` files**, one per quant type (`Q2_K` through `Q8_0`, `bf16`, the `IQ*`/`K_L`/`K_S`/`K_M`
-variants); the official `Qwen/Qwen3-1.7B-GGUF` ships exactly **one** (`Q8_0`). There is no
-mechanism in the format for reading a partial range of one file at a lower bit-width — switching
-precision means loading a *different file*, not adjusting an mmap range. This is the exact
-pattern spec §14's prior-art table already contrasts Tessera against: *"llama.cpp K-quants —
-hand-tuned mixed precision, one file per width."* Adopting GGUF as the production backend means
-adopting that pattern for real, which directly conflicts with:
-- **Thesis claim 3** (spec §1): *"switching precision is an mmap range change, not a
-  re-quantization."* True for "not a re-quantization" (GGUF files are pre-quantized once, matching
-  what the allocator decided — no re-quantization at runtime). **Not true for "mmap range
-  change"** — a precision switch on the ggml path is a file swap and a reload.
-- **Runtime bit-plane drop** (spec §5.3, §9 stretch goal 3): "release the tail planes and keep
-  generating" has no GGUF equivalent. There is nothing to release from a fixed-precision file.
-- **The Pi 5 demo's step 3** (spec §12, written in the previous amendment): "same device, same
-  artifact, weights visibly shrink live... no reload" is the exact claim a GGUF-backed runtime
-  cannot make.
+GGUF is fixed-precision *per file* at the whole-model level (confirmed: `bartowski/
+Qwen_Qwen3-1.7B-GGUF` ships 24 separate files, one per quant type; the official `Qwen/
+Qwen3-1.7B-GGUF` ships exactly one). **But GGUF supports different quantization types per
+tensor within a single file — confirmed directly against `llama-quantize`'s own docs, not
+assumed.** This is exactly how K-quants work internally (`Q4_K_M` assigns richer precision to
+`down_proj`/`v_proj` than the rest), and it's user-programmable, not just a built-in heuristic:
 
-**Recommended resolution (not yet applied — flagging for a decision before touching §12's demo
-script or §1's claim wording):** split the runtime by what each backend is actually good at.
-- **ggml/llama.cpp**: the production path for *static* per-session loads on Pi 5/Pi Zero —
-  pre-bake one GGUF per manifest in the grid (spec §4.2: 16 manifests already; 16 GGUF files is
-  the same shape of artifact set, not a new one), matched to the allocator's actual per-tensor
-  bit-widths as closely as GGUF's quant types allow. This is where the real M4 RSS win lives.
-- **The `.tsra` nested runtime** (this repo's own format + a hand-rolled dequant path, already
-  built): kept specifically for the demo moments that need genuine live adjustment without a
-  reload — Pi 5 step 3's long-context weight shrink, and the bit-plane-drop stretch goal. Slower
-  and heavier than ggml, but it's the only one of the two that can do this.
-- Net effect on the pitch: claim 3 becomes *"the nested format enables live, no-reload precision
-  adjustment where the demo needs it; the production path for static loads uses the fastest
-  available backend per device"* — narrower than the original unqualified claim, but still real
-  and still differentiated from GGUF/K-quants. **This is a framing change to a claim already
-  written into the pitch deck outline (docs/pitch.md) and demo script (docs/demo-script.md) — it
-  needs sign-off before those documents change, not a unilateral rewrite.**
+```
+llama-quantize --tensor-type "\.(\d*[13579])\.attn_k=q5_k" \
+               --tensor-type "\.(\d*[02468])\.attn_q=q3_k" \
+               input-model-f32.gguf output.gguf q4_k_m
+```
+
+`--tensor-type` takes a regex + quant type and may be repeated arbitrarily; `--token-embedding-
+type`/`--output-tensor-type` cover `token_embd`/`output_norm` specifically. **This means the
+allocator's actual per-tensor bit assignment — the project's real research contribution —
+deploys to GGUF unchanged**, mapped from our arbitrary-bit-per-tensor decisions to the nearest
+available GGUF quant type (`Q2_K`...`Q8_0`) per tensor. What GGUF genuinely cannot do is change
+precision *without a reload* — that part of the original conflict stands.
+
+**Decision: reject the hybrid, single backend, reframe the claim — not deferred to later.**
+Running the live-shrink demo moment on a backend (PyTorch) that doesn't actually reduce memory
+would mean the most impressive part of the demo is the part that isn't real, and a fabricated
+memory story is exactly the failure mode judges are best at catching. So:
+- **One backend: ggml, everywhere, no PyTorch demo moments.** The allocator's per-tensor
+  decisions convert to a `--tensor-type` invocation per manifest (16 manifests, spec §4.2 — same
+  shape of artifact set already planned, now GGUF files instead of nothing).
+- **Thesis claim 3 (spec §1) moves from runtime to storage, and gets stronger for it:**
+  ~~"switching precision is an mmap range change, not a re-quantization"~~ → **"one `.tsra`
+  artifact (1.7 GB) covers the model's full precision range; any profile materializes from it in
+  under two seconds. A community repo covering the same range ships 24 separate files."** This is
+  concrete, verifiable, and the comparison is one we already measured — stronger than "live
+  shrink" was, because "live shrink" invited exactly the question of whether memory actually
+  moved, and now nothing does until you choose to reload.
+- **Pi 5 demo step 3 (spec §12) reframes from "no reload" to "reload fast enough nobody notices
+  there was one."** Measured cold load was 1.6 s — that reads as instant. Narrate the shrink as
+  "the daemon detects the session outgrew its budget and re-materializes the next profile" rather
+  than an in-place mmap adjustment. `docs/demo-script.md`/`docs/pitch.md` need rewriting to match
+  — tracked as a follow-up, not deferred indefinitely (a spec.md wording change isn't the same
+  work as a rehearsed demo script's wording change, so they're sequenced, not skipped).
+- **Runtime bit-plane drop (spec §5.3, §9 stretch goal 3) stays a stretch goal, explicitly.**
+  True in-place plane-dropping only exists on the `.tsra` runtime path, not ggml — keep pursuing
+  it there if time allows, but nothing in the pitch depends on it landing.
+- **Materialize-on-first-use, cache the result:** converting `.tsra` → GGUF via `llama-quantize`
+  at each manifest's bit assignment is an offline/first-touch cost, not a per-demo-switch cost —
+  cache the converted GGUF per manifest so repeat demo runs hit the warm path.
 
 **Recorded but not building (future work, spec amendment):** per-expert bit allocation for MoE
 models. Routing frequency confounds sensitivity measurement the same way it did for the rejected
