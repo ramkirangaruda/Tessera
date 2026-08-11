@@ -615,13 +615,38 @@ def run_pilot_validation(
        the full sweep. Otherwise: stop and report, don't launch. Reports the margin, not just
        win/lose — a 0.2% win and a 4% win are different findings about the project.
     """
+    import gc
+
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from compiler.allocate import allocate, load_sensitivity, total_bytes_of, uniform_allocation
     from eval.harness import evaluate_gsm8k_exact_match
 
+    def _cleanup():
+        # lm_eval's HFLM deep-copies the whole passed-in model onto the GPU on construction
+        # (confirmed: a prior run OOM'd inside torch.nn.Parameter.__deepcopy__ on the 2nd/3rd
+        # confirmation call) — each of the 3 evaluate_gsm8k_exact_match calls below leaves a
+        # stale copy behind unless explicitly reclaimed before the next one.
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+    # confirmation-phase checkpoint — separate from the sweep's own (already-resumable)
+    # checkpoint, since the 3 GSM8K evaluations here are ~10-15 min each and losing all 3 to a
+    # crash after the sweep already finished would be a bad trade for a `gc.collect()` call.
+    confirm_checkpoint_path = str(Path(sensitivity_path).with_suffix(".confirm.json"))
+    confirmed: Dict[str, float] = {}
+    if Path(confirm_checkpoint_path).exists():
+        confirmed = json.loads(Path(confirm_checkpoint_path).read_text())
+        if confirmed:
+            print(f"resuming confirmation phase: {list(confirmed)} already done", flush=True)
+
+    def _save_confirmed(key: str, value: float) -> None:
+        confirmed[key] = value
+        Path(confirm_checkpoint_path).write_text(json.dumps(confirmed, indent=2))
 
     print(f"=== pilot sweep: {domain}, bits={pilot_bits} ===", flush=True)
     run_sweep(model_name, [domain], sensitivity_path, group_size=group_size, bit_choices=pilot_bits, device=device)
@@ -662,21 +687,39 @@ def run_pilot_validation(
         for tensor_name, original in originals.items():
             restore_and_assert(get_param(state, tensor_name), original)
 
-    print("evaluating baseline (fp16)...", flush=True)
-    baseline_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
-    print(f"baseline_metric={baseline_metric:.4f}", flush=True)
+    if "baseline_metric" in confirmed:
+        baseline_metric = confirmed["baseline_metric"]
+        print(f"baseline_metric={baseline_metric:.4f} (from checkpoint)", flush=True)
+    else:
+        print("evaluating baseline (fp16)...", flush=True)
+        baseline_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+        _cleanup()
+        _save_confirmed("baseline_metric", baseline_metric)
+        print(f"baseline_metric={baseline_metric:.4f}", flush=True)
 
-    print("evaluating smart allocation...", flush=True)
-    originals = apply_allocation(smart_allocation)
-    smart_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
-    restore_allocation(originals)
-    print(f"smart_metric={smart_metric:.4f}", flush=True)
+    if "smart_metric" in confirmed:
+        smart_metric = confirmed["smart_metric"]
+        print(f"smart_metric={smart_metric:.4f} (from checkpoint)", flush=True)
+    else:
+        print("evaluating smart allocation...", flush=True)
+        originals = apply_allocation(smart_allocation)
+        smart_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+        restore_allocation(originals)
+        _cleanup()
+        _save_confirmed("smart_metric", smart_metric)
+        print(f"smart_metric={smart_metric:.4f}", flush=True)
 
-    print("evaluating uniform allocation...", flush=True)
-    originals = apply_allocation(uniform_alloc)
-    uniform_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
-    restore_allocation(originals)
-    print(f"uniform_metric={uniform_metric:.4f}", flush=True)
+    if "uniform_metric" in confirmed:
+        uniform_metric = confirmed["uniform_metric"]
+        print(f"uniform_metric={uniform_metric:.4f} (from checkpoint)", flush=True)
+    else:
+        print("evaluating uniform allocation...", flush=True)
+        originals = apply_allocation(uniform_alloc)
+        uniform_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+        restore_allocation(originals)
+        _cleanup()
+        _save_confirmed("uniform_metric", uniform_metric)
+        print(f"uniform_metric={uniform_metric:.4f}", flush=True)
 
     margin = smart_metric - uniform_metric
     verdict = "PASS — launch full sweep" if margin > 0 else "STOP — do not launch full sweep"
