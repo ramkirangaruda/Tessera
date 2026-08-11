@@ -1,0 +1,283 @@
+=== pilot sweep: math, bits=(3, 6) ===
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<03:10,  1.62it/s]Loading weights:   3%|2         | 9/311 [00:00<00:18, 16.38it/s]Loading weights:  23%|##2       | 70/311 [00:00<00:01, 134.64it/s]Loading weights:  31%|###       | 95/311 [00:01<00:01, 108.25it/s]Loading weights:  37%|###6      | 114/311 [00:01<00:02, 93.81it/s]Loading weights:  41%|####1     | 129/311 [00:01<00:02, 88.57it/s]Loading weights:  45%|####5     | 141/311 [00:01<00:02, 82.01it/s]Loading weights:  49%|####8     | 152/311 [00:01<00:02, 79.36it/s]Loading weights:  52%|#####2    | 162/311 [00:02<00:02, 74.21it/s]Loading weights:  57%|#####6    | 177/311 [00:02<00:01, 85.48it/s]Loading weights:  61%|######1   | 191/311 [00:02<00:01, 92.74it/s]Loading weights:  65%|######5   | 203/311 [00:02<00:01, 98.11it/s]Loading weights:  69%|######8   | 214/311 [00:02<00:00, 97.91it/s]Loading weights:  73%|#######2  | 226/311 [00:02<00:00, 100.65it/s]Loading weights:  76%|#######6  | 237/311 [00:02<00:00, 102.00it/s]Loading weights:  80%|#######9  | 248/311 [00:04<00:02, 21.15it/s] Loading weights: 100%|##########| 311/311 [00:04<00:00, 69.70it/s]
+C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (6.0.0.post1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+100/394 (math, 3-bit, blk.14.attn_q)
+200/394 (math, 6-bit, blk.0.attn_k)
+300/394 (math, 6-bit, blk.14.attn_o)
+wrote compiler/pilot_sensitivity.parquet: 394 rows
+budget=1075281920 smart_bytes=1013006336 uniform_bytes=752697344
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:01<05:18,  1.03s/it]Loading weights:  23%|##2       | 70/311 [00:01<00:02, 84.34it/s]Loading weights:  35%|###5      | 109/311 [00:01<00:01, 109.63it/s]Loading weights:  44%|####4     | 138/311 [00:01<00:01, 105.83it/s]Loading weights:  51%|#####1    | 160/311 [00:01<00:01, 93.48it/s] Loading weights:  57%|#####6    | 177/311 [00:02<00:01, 84.88it/s]Loading weights:  61%|######1   | 190/311 [00:02<00:01, 77.82it/s]Loading weights:  65%|######4   | 201/311 [00:02<00:01, 65.89it/s]Loading weights:  68%|######7   | 210/311 [00:02<00:01, 65.04it/s]Loading weights:  70%|#######   | 218/311 [00:03<00:01, 58.36it/s]Loading weights:  72%|#######2  | 225/311 [00:03<00:01, 57.83it/s]Loading weights:  75%|#######4  | 233/311 [00:03<00:01, 61.45it/s]Loading weights:  77%|#######7  | 240/311 [00:03<00:01, 55.12it/s]Loading weights:  79%|#######9  | 246/311 [00:03<00:01, 49.83it/s]Loading weights:  83%|########2 | 257/311 [00:03<00:01, 47.67it/s]Loading weights:  86%|########6 | 268/311 [00:04<00:00, 50.20it/s]Loading weights:  89%|########8 | 276/311 [00:04<00:00, 40.60it/s]Loading weights:  92%|#########2| 287/311 [00:04<00:00, 47.81it/s]Loading weights:  95%|#########5| 296/311 [00:04<00:00, 40.83it/s]Loading weights:  97%|#########7| 303/311 [00:04<00:00, 42.29it/s]Loading weights: 100%|##########| 311/311 [00:04<00:00, 62.38it/s]
+evaluating baseline (fp16)...
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 35%|###5      | 7/20 [00:00<00:00, 67.03it/s] 70%|#######   | 14/20 [00:00<00:00, 62.47it/s]100%|##########| 20/20 [00:00<00:00, 60.84it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:29<28:25, 89.76s/it]Running generate_until requests:  10%|#         | 2/20 [02:14<19:00, 63.34s/it]Running generate_until requests:  15%|#5        | 3/20 [02:39<13:01, 45.97s/it]Running generate_until requests:  20%|##        | 4/20 [02:56<09:12, 34.53s/it]Running generate_until requests:  25%|##5       | 5/20 [04:06<11:49, 47.33s/it]Running generate_until requests:  30%|###       | 6/20 [04:49<10:37, 45.56s/it]Running generate_until requests:  35%|###5      | 7/20 [05:52<11:06, 51.27s/it]Running generate_until requests:  40%|####      | 8/20 [06:28<09:20, 46.70s/it]Running generate_until requests:  45%|####5     | 9/20 [06:50<07:05, 38.73s/it]Running generate_until requests:  50%|#####     | 10/20 [08:03<08:13, 49.30s/it]Running generate_until requests:  55%|#####5    | 11/20 [08:51<07:21, 49.08s/it]Running generate_until requests:  60%|######    | 12/20 [09:49<06:53, 51.75s/it]Running generate_until requests:  65%|######5   | 13/20 [10:24<05:25, 46.53s/it]Running generate_until requests:  70%|#######   | 14/20 [11:01<04:22, 43.78s/it]Running generate_until requests:  75%|#######5  | 15/20 [11:49<03:44, 44.90s/it]Running generate_until requests:  80%|########  | 16/20 [12:09<02:29, 37.47s/it]Running generate_until requests:  85%|########5 | 17/20 [13:06<02:10, 43.35s/it]Running generate_until requests:  90%|######### | 18/20 [13:49<01:26, 43.32s/it]Running generate_until requests:  95%|#########5| 19/20 [14:28<00:41, 41.88s/it]Running generate_until requests: 100%|##########| 20/20 [15:01<00:00, 39.24s/it]Running generate_until requests: 100%|##########| 20/20 [15:01<00:00, 45.06s/it]
+baseline_metric=0.4500
+evaluating smart allocation...
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 35%|###5      | 7/20 [00:00<00:00, 68.36it/s] 70%|#######   | 14/20 [00:00<00:00, 68.51it/s]100%|##########| 20/20 [00:00<00:00, 68.09it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:15<24:03, 75.99s/it]Running generate_until requests:  10%|#         | 2/20 [01:53<15:57, 53.20s/it]Running generate_until requests:  15%|#5        | 3/20 [02:17<11:20, 40.05s/it]Running generate_until requests:  20%|##        | 4/20 [03:23<13:24, 50.27s/it]Running generate_until requests:  25%|##5       | 5/20 [04:20<13:07, 52.53s/it]Running generate_until requests:  30%|###       | 6/20 [04:50<10:29, 44.95s/it]Running generate_until requests:  35%|###5      | 7/20 [05:43<10:21, 47.77s/it]Running generate_until requests:  40%|####      | 8/20 [06:25<09:10, 45.88s/it]Running generate_until requests:  45%|####5     | 9/20 [06:43<06:49, 37.23s/it]Running generate_until requests:  50%|#####     | 10/20 [07:39<07:07, 42.80s/it]Running generate_until requests:  55%|#####5    | 11/20 [08:30<06:48, 45.43s/it]Running generate_until requests:  60%|######    | 12/20 [09:45<07:16, 54.51s/it]Running generate_until requests:  65%|######5   | 13/20 [11:01<07:06, 61.00s/it]Running generate_until requests:  70%|#######   | 14/20 [11:37<05:20, 53.41s/it]Running generate_until requests:  75%|#######5  | 15/20 [12:25<04:17, 51.57s/it]Running generate_until requests:  80%|########  | 16/20 [12:37<02:38, 39.71s/it]Running generate_until requests:  85%|########5 | 17/20 [13:16<01:58, 39.59s/it]Running generate_until requests:  90%|######### | 18/20 [14:38<01:44, 52.32s/it]Running generate_until requests:  95%|#########5| 19/20 [15:51<00:58, 58.43s/it]Running generate_until requests: 100%|##########| 20/20 [16:44<00:00, 57.00s/it]Running generate_until requests: 100%|##########| 20/20 [16:44<00:00, 50.24s/it]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\ramki\Desktop\here\tessera\compiler\sweep.py", line 750, in <module>
+    main()
+  File "C:\Users\ramki\Desktop\here\tessera\compiler\sweep.py", line 737, in main
+    run_pilot_validation(
+  File "C:\Users\ramki\Desktop\here\tessera\compiler\sweep.py", line 671, in run_pilot_validation
+    smart_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\Desktop\here\tessera\eval\harness.py", line 86, in evaluate_gsm8k_exact_match
+    results = lm_eval.simple_evaluate(
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\utils.py", line 575, in _wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\evaluator.py", line 358, in simple_evaluate
+    results = evaluate(
+              ^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\utils.py", line 575, in _wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\evaluator.py", line 700, in evaluate
+    res = _process_results(eval_results_acc, groups, bootstrap_iters)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\evaluator_utils.py", line 387, in _process_results
+    results = _collect_results(eval_results_acc, groups or {}, bootstrap_iters)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\evaluator_utils.py", line 252, in _collect_results
+    task_config = dict(task.dump_config())
+                       ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\api\task.py", line 518, in dump_config
+    return self.config.to_dict()
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\lm_eval\config\task.py", line 187, in to_dict
+    cfg_dict = asdict(self)
+               ^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\dataclasses.py", line 1329, in asdict
+    return _asdict_inner(obj, dict_factory)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\dataclasses.py", line 1339, in _asdict_inner
+    f.name: _asdict_inner(getattr(obj, f.name), dict)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\dataclasses.py", line 1382, in _asdict_inner
+    return type(obj)((_asdict_inner(k, dict_factory),
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\dataclasses.py", line 1383, in <genexpr>
+    _asdict_inner(v, dict_factory))
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\dataclasses.py", line 1386, in _asdict_inner
+    return copy.deepcopy(obj)
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 162, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 259, in _reconstruct
+    state = deepcopy(state, memo)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 162, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 259, in _reconstruct
+    state = deepcopy(state, memo)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 162, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 259, in _reconstruct
+    state = deepcopy(state, memo)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 162, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 259, in _reconstruct
+    state = deepcopy(state, memo)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 162, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 259, in _reconstruct
+    state = deepcopy(state, memo)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 162, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 259, in _reconstruct
+    state = deepcopy(state, memo)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 136, in deepcopy
+    y = copier(x, memo)
+        ^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 221, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+                             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\copy.py", line 143, in deepcopy
+    y = copier(memo)
+        ^^^^^^^^^^^^
+  File "C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\torch\nn\parameter.py", line 79, in __deepcopy__
+    self.data.clone(memory_format=torch.preserve_format), self.requires_grad
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: out of memory
+Search for `cudaErrorMemoryAllocation' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+=== pilot sweep: math, bits=(3, 6) ===
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<04:53,  1.06it/s]Loading weights:   1%|          | 2/311 [00:01<03:08,  1.64it/s]Loading weights:  22%|##1       | 67/311 [00:01<00:03, 74.63it/s]Loading weights:  28%|##7       | 86/311 [00:01<00:03, 67.59it/s]Loading weights:  32%|###2      | 100/311 [00:02<00:03, 62.23it/s]Loading weights:  36%|###5      | 111/311 [00:02<00:03, 60.07it/s]Loading weights:  39%|###8      | 120/311 [00:02<00:03, 59.78it/s]Loading weights:  41%|####1     | 128/311 [00:02<00:03, 52.47it/s]Loading weights:  44%|####3     | 136/311 [00:05<00:15, 11.29it/s]Loading weights:  51%|#####1    | 160/311 [00:05<00:07, 21.02it/s]Loading weights:  58%|#####7    | 180/311 [00:05<00:04, 31.12it/s]Loading weights:  64%|######3   | 199/311 [00:05<00:02, 43.01it/s]Loading weights:  69%|######8   | 214/311 [00:05<00:01, 51.81it/s]Loading weights:  75%|#######4  | 233/311 [00:05<00:01, 68.14it/s]Loading weights:  80%|########  | 249/311 [00:06<00:00, 76.64it/s]Loading weights:  86%|########6 | 268/311 [00:06<00:00, 93.46it/s]Loading weights:  93%|#########3| 290/311 [00:06<00:00, 111.69it/s]Loading weights: 100%|##########| 311/311 [00:06<00:00, 48.81it/s] 
+resuming: 394 evaluations already checkpointed
+C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (6.0.0.post1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+wrote compiler/pilot_sensitivity.parquet: 394 rows
+budget=1075281920 smart_bytes=1013006336 uniform_bytes=752697344
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<03:34,  1.44it/s]Loading weights:  16%|#6        | 50/311 [00:00<00:03, 84.83it/s]Loading weights:  25%|##5       | 79/311 [00:01<00:02, 99.97it/s]Loading weights:  32%|###2      | 101/311 [00:01<00:01, 117.58it/s]Loading weights:  39%|###9      | 122/311 [00:01<00:01, 109.97it/s]Loading weights:  45%|####4     | 139/311 [00:01<00:01, 95.06it/s] Loading weights:  51%|#####1    | 160/311 [00:01<00:01, 107.63it/s]Loading weights:  56%|#####5    | 174/311 [00:01<00:01, 109.53it/s]Loading weights:  60%|######    | 188/311 [00:01<00:01, 110.43it/s]Loading weights:  65%|######4   | 201/311 [00:02<00:01, 101.77it/s]Loading weights:  68%|######8   | 213/311 [00:02<00:01, 84.03it/s] Loading weights:  73%|#######2  | 226/311 [00:02<00:00, 92.38it/s]Loading weights:  76%|#######6  | 237/311 [00:02<00:01, 71.04it/s]Loading weights:  83%|########2 | 257/311 [00:02<00:00, 93.05it/s]Loading weights:  86%|########6 | 269/311 [00:03<00:00, 67.16it/s]Loading weights:  93%|#########3| 290/311 [00:03<00:00, 86.05it/s]Loading weights: 100%|##########| 311/311 [00:03<00:00, 91.50it/s]
+evaluating baseline (fp16)...
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 35%|###5      | 7/20 [00:00<00:00, 61.37it/s] 70%|#######   | 14/20 [00:00<00:00, 60.64it/s]100%|##########| 20/20 [00:00<00:00, 59.27it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:35<30:21, 95.88s/it]Running generate_until requests:  10%|#         | 2/20 [02:17<19:09, 63.85s/it]Running generate_until requests:  15%|#5        | 3/20 [02:42<13:05, 46.23s/it]Running generate_until requests:  20%|##        | 4/20 [03:35<13:04, 49.01s/it]Running generate_until requests:  25%|##5       | 5/20 [04:11<11:02, 44.19s/it]Running generate_until requests:  30%|###       | 6/20 [04:44<09:24, 40.33s/it]Running generate_until requests:  35%|###5      | 7/20 [05:47<10:20, 47.71s/it]Running generate_until requests:  40%|####      | 8/20 [06:26<09:00, 45.03s/it]Running generate_until requests:  45%|####5     | 9/20 [06:46<06:49, 37.23s/it]Running generate_until requests:  50%|#####     | 10/20 [08:04<08:17, 49.73s/it]Running generate_until requests:  55%|#####5    | 11/20 [08:46<07:06, 47.39s/it]Running generate_until requests:  60%|######    | 12/20 [09:37<06:28, 48.52s/it]Running generate_until requests:  65%|######5   | 13/20 [10:08<05:01, 43.07s/it]Running generate_until requests:  70%|#######   | 14/20 [10:44<04:06, 41.11s/it]Running generate_until requests:  75%|#######5  | 15/20 [11:35<03:40, 44.08s/it]Running generate_until requests:  80%|########  | 16/20 [11:55<02:27, 36.83s/it]Running generate_until requests:  85%|########5 | 17/20 [12:55<02:11, 43.91s/it]Running generate_until requests:  90%|######### | 18/20 [13:46<01:31, 45.80s/it]Running generate_until requests:  95%|#########5| 19/20 [14:30<00:45, 45.42s/it]Running generate_until requests: 100%|##########| 20/20 [15:08<00:00, 43.13s/it]Running generate_until requests: 100%|##########| 20/20 [15:08<00:00, 45.42s/it]
+baseline_metric=0.4500
+evaluating smart allocation...
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 30%|###       | 6/20 [00:00<00:00, 49.93it/s] 60%|######    | 12/20 [00:00<00:00, 54.07it/s] 90%|######### | 18/20 [00:00<00:00, 54.93it/s]100%|##########| 20/20 [00:00<00:00, 54.67it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:15<24:03, 75.97s/it]Running generate_until requests:  10%|#         | 2/20 [01:57<16:40, 55.61s/it]Running generate_until requests:  15%|#5        | 3/20 [02:24<12:03, 42.58s/it]Running generate_until requests:  20%|##        | 4/20 [03:37<14:32, 54.53s/it]Running generate_until requests:  25%|##5       | 5/20 [04:49<15:12, 60.80s/it]Running generate_until requests:  30%|###       | 6/20 [05:25<12:13, 52.38s/it]Running generate_until requests:  35%|###5      | 7/20 [06:23<11:45, 54.26s/it]Running generate_until requests:  40%|####      | 8/20 [07:09<10:18, 51.52s/it]Running generate_until requests:  45%|####5     | 9/20 [07:28<07:36, 41.47s/it]Running generate_until requests:  50%|#####     | 10/20 [08:29<07:56, 47.64s/it]Running generate_until requests:  55%|#####5    | 11/20 [09:27<07:35, 50.61s/it]Running generate_until requests:  60%|######    | 12/20 [10:39<07:38, 57.27s/it]Running generate_until requests:  65%|######5   | 13/20 [11:51<07:11, 61.70s/it]Running generate_until requests:  70%|#######   | 14/20 [12:13<04:57, 49.63s/it]Running generate_until requests:  75%|#######5  | 15/20 [12:39<03:33, 42.62s/it]Running generate_until requests:  80%|########  | 16/20 [12:52<02:14, 33.61s/it]Running generate_until requests:  85%|########5 | 17/20 [13:57<02:09, 43.24s/it]Running generate_until requests:  90%|######### | 18/20 [15:12<01:45, 52.50s/it]Running generate_until requests:  95%|#########5| 19/20 [16:13<00:55, 55.24s/it]Running generate_until requests: 100%|##########| 20/20 [16:47<00:00, 48.80s/it]Running generate_until requests: 100%|##########| 20/20 [16:47<00:00, 50.37s/it]
+smart_metric=0.1000
+evaluating uniform allocation...
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 35%|###5      | 7/20 [00:00<00:00, 61.44it/s] 70%|#######   | 14/20 [00:00<00:00, 59.81it/s]100%|##########| 20/20 [00:00<00:00, 61.79it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:18<24:42, 78.00s/it]Running generate_until requests:  10%|#         | 2/20 [02:34<23:07, 77.07s/it]Running generate_until requests:  15%|#5        | 3/20 [03:52<21:56, 77.41s/it]Running generate_until requests:  20%|##        | 4/20 [05:08<20:33, 77.11s/it]Running generate_until requests:  25%|##5       | 5/20 [06:25<19:12, 76.85s/it]Running generate_until requests:  30%|###       | 6/20 [07:40<17:50, 76.44s/it]Running generate_until requests:  35%|###5      | 7/20 [08:57<16:32, 76.36s/it]Running generate_until requests:  40%|####      | 8/20 [10:13<15:14, 76.24s/it]Running generate_until requests:  45%|####5     | 9/20 [11:29<13:57, 76.14s/it]Running generate_until requests:  50%|#####     | 10/20 [12:44<12:39, 75.99s/it]Running generate_until requests:  55%|#####5    | 11/20 [14:02<11:27, 76.41s/it]Running generate_until requests:  60%|######    | 12/20 [15:18<10:10, 76.36s/it]Running generate_until requests:  65%|######5   | 13/20 [16:34<08:54, 76.35s/it]Running generate_until requests:  70%|#######   | 14/20 [17:40<07:19, 73.22s/it]Running generate_until requests:  75%|#######5  | 15/20 [18:50<06:00, 72.16s/it]Running generate_until requests:  80%|########  | 16/20 [20:06<04:53, 73.49s/it]Running generate_until requests:  85%|########5 | 17/20 [21:07<03:28, 69.60s/it]Running generate_until requests:  90%|######### | 18/20 [21:44<01:59, 59.86s/it]Running generate_until requests:  95%|#########5| 19/20 [22:18<00:52, 52.16s/it]Running generate_until requests: 100%|##########| 20/20 [22:55<00:00, 47.55s/it]Running generate_until requests: 100%|##########| 20/20 [22:55<00:00, 68.78s/it]
+uniform_metric=0.0000
+{
+  "domain": "math",
+  "pilot_bits": [
+    3,
+    6
+  ],
+  "budget_bytes": 1075281920,
+  "smart_bytes": 1013006336,
+  "uniform_bytes": 752697344,
+  "n_confirmation_problems": 20,
+  "num_fewshot": 5,
+  "baseline_metric": 0.45,
+  "smart_metric": 0.1,
+  "uniform_metric": 0.0,
+  "margin": 0.1,
+  "verdict": "PASS \u2014 launch full sweep"
+}
+resuming confirmation phase: ['baseline_metric', 'smart_metric', 'uniform_metric'] already done
+=== pilot sweep: math, bits=(3, 6) ===
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<03:50,  1.35it/s]Loading weights:   2%|1         | 6/311 [00:00<00:33,  9.18it/s]Loading weights:  25%|##5       | 78/311 [00:00<00:01, 141.65it/s]Loading weights:  36%|###6      | 112/311 [00:01<00:01, 122.45it/s]Loading weights:  44%|####4     | 137/311 [00:01<00:02, 85.39it/s] Loading weights:  50%|####9     | 155/311 [00:02<00:01, 82.66it/s]Loading weights:  55%|#####4    | 170/311 [00:02<00:02, 65.34it/s]Loading weights:  58%|#####8    | 181/311 [00:02<00:02, 62.62it/s]Loading weights:  61%|######1   | 191/311 [00:02<00:01, 63.23it/s]Loading weights:  65%|######4   | 202/311 [00:03<00:01, 58.40it/s]Loading weights:  68%|######8   | 213/311 [00:03<00:01, 63.52it/s]Loading weights:  72%|#######2  | 224/311 [00:03<00:01, 62.30it/s]Loading weights:  76%|#######5  | 235/311 [00:03<00:01, 58.73it/s]Loading weights:  79%|#######9  | 246/311 [00:03<00:01, 64.01it/s]Loading weights:  83%|########2 | 257/311 [00:03<00:00, 66.86it/s]Loading weights:  86%|########6 | 268/311 [00:04<00:00, 64.42it/s]Loading weights:  90%|########9 | 279/311 [00:04<00:00, 68.78it/s]Loading weights:  93%|#########3| 290/311 [00:04<00:00, 67.82it/s]Loading weights:  97%|#########6| 301/311 [00:04<00:00, 58.70it/s]Loading weights: 100%|##########| 311/311 [00:04<00:00, 67.91it/s]
+resuming: 394 evaluations already checkpointed
+C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (6.0.0.post1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+wrote compiler/pilot_sensitivity.parquet: 394 rows
+budget=1075281920 smart_bytes=1013006336 uniform_lo_bytes=752697344 uniform_hi_bytes=1397866496
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<02:03,  2.51it/s]Loading weights:  15%|#4        | 46/311 [00:01<00:06, 40.57it/s]Loading weights:  59%|#####8    | 182/311 [00:01<00:00, 188.63it/s]Loading weights:  79%|#######8  | 245/311 [00:01<00:00, 150.74it/s]Loading weights:  93%|#########2| 288/311 [00:02<00:00, 147.61it/s]Loading weights: 100%|##########| 311/311 [00:02<00:00, 128.70it/s]
+baseline_metric=0.4500 (from checkpoint)
+smart_metric=0.1000 (from checkpoint)
+uniform_metric=0.0000 (from checkpoint)
+evaluating uniform allocation (hi, the real equal-or-fewer-bytes gate)...
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 30%|###       | 6/20 [00:00<00:00, 57.80it/s] 65%|######5   | 13/20 [00:00<00:00, 60.60it/s]100%|##########| 20/20 [00:00<00:00, 61.33it/s]100%|##########| 20/20 [00:00<00:00, 60.69it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:11<22:45, 71.87s/it]Running generate_until requests:  10%|#         | 2/20 [01:45<14:50, 49.46s/it]Running generate_until requests:  15%|#5        | 3/20 [02:15<11:31, 40.70s/it]Running generate_until requests:  20%|##        | 4/20 [03:29<14:21, 53.84s/it]Running generate_until requests:  25%|##5       | 5/20 [04:44<15:17, 61.18s/it]Running generate_until requests:  30%|###       | 6/20 [05:22<12:27, 53.39s/it]Running generate_until requests:  35%|###5      | 7/20 [06:07<10:59, 50.71s/it]Running generate_until requests:  40%|####      | 8/20 [06:46<09:24, 47.02s/it]Running generate_until requests:  45%|####5     | 9/20 [07:06<07:02, 38.39s/it]Running generate_until requests:  50%|#####     | 10/20 [07:45<06:26, 38.69s/it]Running generate_until requests:  55%|#####5    | 11/20 [08:28<06:00, 40.03s/it]Running generate_until requests:  60%|######    | 12/20 [09:15<05:37, 42.17s/it]Running generate_until requests:  65%|######5   | 13/20 [09:49<04:38, 39.75s/it]Running generate_until requests:  70%|#######   | 14/20 [11:01<04:56, 49.40s/it]Running generate_until requests:  75%|#######5  | 15/20 [11:25<03:28, 41.69s/it]Running generate_until requests:  80%|########  | 16/20 [11:33<02:06, 31.63s/it]Running generate_until requests:  85%|########5 | 17/20 [12:01<01:31, 30.41s/it]Running generate_until requests:  90%|######### | 18/20 [12:30<01:00, 30.03s/it]Running generate_until requests:  95%|#########5| 19/20 [12:59<00:29, 29.65s/it]Running generate_until requests: 100%|##########| 20/20 [13:33<00:00, 31.19s/it]Running generate_until requests: 100%|##########| 20/20 [13:33<00:00, 40.69s/it]
+uniform_hi_metric=0.3500
+{
+  "domain": "math",
+  "pilot_bits": [
+    3,
+    6
+  ],
+  "budget_bytes": 1075281920,
+  "smart_bytes": 1013006336,
+  "uniform_bytes": 752697344,
+  "uniform_hi_bytes": 1397866496,
+  "n_confirmation_problems": 20,
+  "num_fewshot": 5,
+  "baseline_metric": 0.45,
+  "smart_metric": 0.1,
+  "uniform_metric": 0.0,
+  "uniform_hi_metric": 0.35,
+  "margin_vs_uniform_lo": 0.1,
+  "margin": -0.24999999999999997,
+  "verdict": "STOP \u2014 do not launch full sweep"
+}

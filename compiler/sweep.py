@@ -658,14 +658,27 @@ def run_pilot_validation(
 
     smart_allocation = allocate(tensors, budget)
     uniform_alloc = uniform_allocation(tensors, min(pilot_bits))
+    uniform_hi_alloc = uniform_allocation(tensors, max(pilot_bits))
     smart_bytes = total_bytes_of(tensors, smart_allocation)
     uniform_bytes = total_bytes_of(tensors, uniform_alloc)
-    print(f"budget={budget} smart_bytes={smart_bytes} uniform_bytes={uniform_bytes}", flush=True)
-    if uniform_bytes > smart_bytes:
+    uniform_hi_bytes = total_bytes_of(tensors, uniform_hi_alloc)
+    print(
+        f"budget={budget} smart_bytes={smart_bytes} uniform_lo_bytes={uniform_bytes} "
+        f"uniform_hi_bytes={uniform_hi_bytes}",
+        flush=True,
+    )
+    # uniform_lo (min(pilot_bits) everywhere) uses FEWER bytes than smart_bytes by construction
+    # (smart's budget is the lo/hi midpoint) — smart beating it is not a fair "equal-or-fewer
+    # bytes" test, since smart gets more memory to work with. That comparison is reported for
+    # visibility only. The gate that matters is smart vs. uniform_hi: uniform_hi_bytes must be
+    # >= smart_bytes so that a smart win means "better quality at fewer-or-equal bytes than a
+    # naive higher-precision uniform baseline" — the actual claim being tested.
+    if uniform_hi_bytes < smart_bytes:
         raise RuntimeError(
-            f"uniform baseline ({uniform_bytes} bytes) exceeds the smart allocation's budget "
-            f"({smart_bytes} bytes) — not a fair 'equal-or-fewer bytes' comparison. This "
-            f"shouldn't happen with budget set to the midpoint; check pilot_bits/budget logic."
+            f"uniform_hi baseline ({uniform_hi_bytes} bytes) is smaller than the smart "
+            f"allocation ({smart_bytes} bytes) — not a fair 'equal-or-fewer bytes' comparison. "
+            f"This shouldn't happen with budget set to the lo/hi midpoint; check pilot_bits/"
+            f"budget logic."
         )
 
     tok = AutoTokenizer.from_pretrained(model_name)
@@ -713,7 +726,7 @@ def run_pilot_validation(
         uniform_metric = confirmed["uniform_metric"]
         print(f"uniform_metric={uniform_metric:.4f} (from checkpoint)", flush=True)
     else:
-        print("evaluating uniform allocation...", flush=True)
+        print("evaluating uniform allocation (lo, informational only)...", flush=True)
         originals = apply_allocation(uniform_alloc)
         uniform_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
         restore_allocation(originals)
@@ -721,7 +734,25 @@ def run_pilot_validation(
         _save_confirmed("uniform_metric", uniform_metric)
         print(f"uniform_metric={uniform_metric:.4f}", flush=True)
 
-    margin = smart_metric - uniform_metric
+    if "uniform_hi_metric" in confirmed:
+        uniform_hi_metric = confirmed["uniform_hi_metric"]
+        print(f"uniform_hi_metric={uniform_hi_metric:.4f} (from checkpoint)", flush=True)
+    else:
+        print("evaluating uniform allocation (hi, the real equal-or-fewer-bytes gate)...", flush=True)
+        originals = apply_allocation(uniform_hi_alloc)
+        uniform_hi_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+        restore_allocation(originals)
+        _cleanup()
+        _save_confirmed("uniform_hi_metric", uniform_hi_metric)
+        print(f"uniform_hi_metric={uniform_hi_metric:.4f}", flush=True)
+
+    # Gate on smart vs. uniform_hi, not smart vs. uniform_lo: uniform_lo has FEWER bytes than
+    # smart by construction (smart's budget is the lo/hi midpoint), so smart beating it only
+    # shows "more bits helps," not that the allocation itself is smart. uniform_hi has
+    # equal-or-more bytes than smart, so smart beating uniform_hi is the actual claim under test:
+    # better quality at fewer-or-equal bytes than naive higher-precision uniform quantization.
+    margin_vs_uniform_lo = smart_metric - uniform_metric
+    margin = smart_metric - uniform_hi_metric
     verdict = "PASS — launch full sweep" if margin > 0 else "STOP — do not launch full sweep"
     result = {
         "domain": domain,
@@ -729,11 +760,14 @@ def run_pilot_validation(
         "budget_bytes": budget,
         "smart_bytes": smart_bytes,
         "uniform_bytes": uniform_bytes,
+        "uniform_hi_bytes": uniform_hi_bytes,
         "n_confirmation_problems": n_confirmation_problems,
         "num_fewshot": num_fewshot,
         "baseline_metric": baseline_metric,
         "smart_metric": smart_metric,
         "uniform_metric": uniform_metric,
+        "uniform_hi_metric": uniform_hi_metric,
+        "margin_vs_uniform_lo": margin_vs_uniform_lo,
         "margin": margin,
         "verdict": verdict,
     }

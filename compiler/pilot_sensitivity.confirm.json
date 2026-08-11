@@ -1,0 +1,6 @@
+{
+  "baseline_metric": 0.45,
+  "smart_metric": 0.1,
+  "uniform_metric": 0.0,
+  "uniform_hi_metric": 0.35
+}

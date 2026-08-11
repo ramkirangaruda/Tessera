@@ -1,0 +1,23 @@
+{
+  "model": "Qwen/Qwen3-1.7B",
+  "group_size": 128,
+  "held_out_seq_len": 2048,
+  "n_held_out_samples": 128,
+  "wikitext_dataset": "Salesforce/wikitext:wikitext-2-raw-v1:test",
+  "m0_wikitext2_baseline_ppl": 16.7835,
+  "bit_choices": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    8
+  ],
+  "domains": [
+    "chat",
+    "code",
+    "math",
+    "summ"
+  ],
+  "recorded_at_utc": "2026-08-11T14:25:32Z"
+}
