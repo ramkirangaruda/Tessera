@@ -483,16 +483,24 @@ def run_sweep(
     seq_len: int = 2048,
     n_held_out_samples: int = 128,
     device: Optional[str] = None,
+    bit_choices: Iterable[int] = BIT_CHOICES,
 ) -> None:
     """Full sweep against a real model + held-out sets. Stratified width-major/domain-major
     order (spec §4.1 pre-flight check 4): outer loops are (domain, bits), inner loop is over
     tensors — so an interrupted run has complete slices, not fragments. Resumable from
-    `checkpoint_path` (spec §4.1 pre-flight check 2)."""
+    `checkpoint_path` (spec §4.1 pre-flight check 2).
+
+    `bit_choices` defaults to the full (2,3,4,5,6,8) set but is overridable — the pilot-sweep
+    validation (spec §4.1 amendment, replacing the per-tensor proxy-validation gate) calls this
+    with `bit_choices=(3, 6)` and a single domain: 197 tensors x 2 widths x 1 domain = 394
+    evaluations, ~8% of the full sweep, enough for the allocator to make a real choice between
+    two widths per tensor without paying for the complete grid."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from compiler.calib import load_domain_held_out_ppl_set, perplexity
 
+    bit_choices = list(bit_choices)
     checkpoint_path = checkpoint_path or str(Path(out_path).with_suffix(".checkpoint.jsonl"))
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -525,13 +533,14 @@ def run_sweep(
     if completed:
         print(f"resuming: {len(completed)} evaluations already checkpointed", flush=True)
 
-    total = len(tensor_names) * len(BIT_CHOICES) * len(list(domains))
+    domains = list(domains)
+    total = len(tensor_names) * len(bit_choices) * len(domains)
     done = 0
     for domain in domains:
         held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set(domain, tok, n_samples=n_held_out_samples, seq_len=seq_len)]
         baseline_ppl = perplexity(model, held_out)
 
-        for bits in BIT_CHOICES:
+        for bits in bit_choices:
             for tensor_name in tensor_names:
                 done += 1
                 key = _checkpoint_key(tensor_name, bits, domain)
@@ -567,6 +576,128 @@ def run_sweep(
     print(f"wrote {out_path}: {n_rows} rows", flush=True)
 
 
+def run_pilot_validation(
+    model_name: str,
+    domain: str = "math",
+    pilot_bits: Tuple[int, int] = (3, 6),
+    group_size: int = 128,
+    n_confirmation_problems: int = 20,
+    num_fewshot: int = 5,
+    sensitivity_path: str = "compiler/pilot_sensitivity.parquet",
+    device: Optional[str] = None,
+) -> dict:
+    """Pilot sweep validation (spec §4.1 amendment) — replaces the per-tensor proxy-validation
+    correlation gate. That gate measured Spearman rho over only 15 tensors; at n=15 the 95% CI
+    on rho spans roughly -0.36 to +0.64, consistent with both "no relationship" and "strong
+    relationship" — no amount of re-measurement at that n resolves it. More fundamentally,
+    per-tensor rank correlation was never the right bar: the allocator aggregates ~197 decisions
+    through a knapsack, so individual ranking errors partially cancel. What has to be true is
+    that the RESULTING ALLOCATION beats uniform quantization at equal-or-fewer bytes on the real
+    task metric — a weaker, more directly relevant claim that a tight per-tensor correlation is
+    sufficient but not necessary for.
+
+    Steps:
+    1. Pilot sweep: 197 tensors x `pilot_bits` x `domain` (394 evals for the (3,6)/1-domain
+       default — ~8% of the full 4,728-eval sweep). Reuses run_sweep, so it's checkpointed and
+       resumable the same way.
+    2. Feed the resulting sensitivity table to the M2 allocator at a budget midway between the
+       all-`min(pilot_bits)` and all-`max(pilot_bits)` byte totals — enough room for the
+       knapsack to make real per-tensor choices.
+    3. Build the fair uniform baseline at `min(pilot_bits)` — the only uniform option that fits
+       at or under the allocator's budget, given only two measured widths (the higher uniform
+       width would exceed budget and isn't a comparable alternative).
+    4. Apply *both* allocations to the live model — all 197 tensors quantized per their assigned
+       bit-width simultaneously, not one at a time (this is the real runtime scenario a manifest
+       actually produces, not a per-tensor sensitivity probe) — and evaluate the real
+       confirmation task metric (few-shot GSM8K exact-match for `math`; 0-shot floors at exactly
+       0% regardless of damage, spec §4.1 amendment) on baseline / smart-allocation / uniform.
+    5. GATE: smart allocation's task metric > uniform's -> proxy validated end-to-end, launch
+       the full sweep. Otherwise: stop and report, don't launch. Reports the margin, not just
+       win/lose — a 0.2% win and a 4% win are different findings about the project.
+    """
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from compiler.allocate import allocate, load_sensitivity, total_bytes_of, uniform_allocation
+    from eval.harness import evaluate_gsm8k_exact_match
+
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+    print(f"=== pilot sweep: {domain}, bits={pilot_bits} ===", flush=True)
+    run_sweep(model_name, [domain], sensitivity_path, group_size=group_size, bit_choices=pilot_bits, device=device)
+
+    tensors = load_sensitivity(sensitivity_path, domain)
+    bytes_lo = total_bytes_of(tensors, {n: min(pilot_bits) for n in tensors})
+    bytes_hi = total_bytes_of(tensors, {n: max(pilot_bits) for n in tensors})
+    budget = (bytes_lo + bytes_hi) // 2
+
+    smart_allocation = allocate(tensors, budget)
+    uniform_alloc = uniform_allocation(tensors, min(pilot_bits))
+    smart_bytes = total_bytes_of(tensors, smart_allocation)
+    uniform_bytes = total_bytes_of(tensors, uniform_alloc)
+    print(f"budget={budget} smart_bytes={smart_bytes} uniform_bytes={uniform_bytes}", flush=True)
+    if uniform_bytes > smart_bytes:
+        raise RuntimeError(
+            f"uniform baseline ({uniform_bytes} bytes) exceeds the smart allocation's budget "
+            f"({smart_bytes} bytes) — not a fair 'equal-or-fewer bytes' comparison. This "
+            f"shouldn't happen with budget set to the midpoint; check pilot_bits/budget logic."
+        )
+
+    tok = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float16).to(device)
+    model.eval()
+    state = dict(model.named_parameters())
+
+    def apply_allocation(allocation: Dict[str, int]) -> Dict[str, "torch.Tensor"]:
+        originals = {}
+        for tensor_name, bits in allocation.items():
+            param = get_param(state, tensor_name)
+            originals[tensor_name] = param.detach().clone()
+            w_hat = fake_quantize_tensor(originals[tensor_name].float().cpu().numpy(), bits, group_size)
+            with torch.no_grad():
+                param.copy_(torch.from_numpy(w_hat).to(originals[tensor_name].dtype))
+        return originals
+
+    def restore_allocation(originals: Dict[str, "torch.Tensor"]) -> None:
+        for tensor_name, original in originals.items():
+            restore_and_assert(get_param(state, tensor_name), original)
+
+    print("evaluating baseline (fp16)...", flush=True)
+    baseline_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+    print(f"baseline_metric={baseline_metric:.4f}", flush=True)
+
+    print("evaluating smart allocation...", flush=True)
+    originals = apply_allocation(smart_allocation)
+    smart_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+    restore_allocation(originals)
+    print(f"smart_metric={smart_metric:.4f}", flush=True)
+
+    print("evaluating uniform allocation...", flush=True)
+    originals = apply_allocation(uniform_alloc)
+    uniform_metric = evaluate_gsm8k_exact_match(model, tok, n_problems=n_confirmation_problems, num_fewshot=num_fewshot)
+    restore_allocation(originals)
+    print(f"uniform_metric={uniform_metric:.4f}", flush=True)
+
+    margin = smart_metric - uniform_metric
+    verdict = "PASS — launch full sweep" if margin > 0 else "STOP — do not launch full sweep"
+    result = {
+        "domain": domain,
+        "pilot_bits": list(pilot_bits),
+        "budget_bytes": budget,
+        "smart_bytes": smart_bytes,
+        "uniform_bytes": uniform_bytes,
+        "n_confirmation_problems": n_confirmation_problems,
+        "num_fewshot": num_fewshot,
+        "baseline_metric": baseline_metric,
+        "smart_metric": smart_metric,
+        "uniform_metric": uniform_metric,
+        "margin": margin,
+        "verdict": verdict,
+    }
+    print(json.dumps(result, indent=2), flush=True)
+    return result
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -579,6 +710,14 @@ def main() -> None:
     pv.add_argument("--model", default="Qwen/Qwen3-1.7B")
     pv.add_argument("--n-problems", type=int, default=50)
     pv.add_argument("--domain", default="general", choices=["general", "code", "math"])
+
+    pl = sub.add_parser("pilot-validation", help="pre-flight: does the ALLOCATION beat uniform at equal bytes?")
+    pl.add_argument("--model", default="Qwen/Qwen3-1.7B")
+    pl.add_argument("--domain", default="math", choices=list(DOMAINS))
+    pl.add_argument("--pilot-bits", type=int, nargs=2, default=[3, 6])
+    pl.add_argument("--n-problems", type=int, default=20)
+    pl.add_argument("--num-fewshot", type=int, default=5)
+    pl.add_argument("--out", default="compiler/pilot_sensitivity.parquet")
 
     run = sub.add_parser("run", help="the full 4,728-evaluation sweep")
     run.add_argument("--model", default="Qwen/Qwen3-1.7B")
@@ -594,6 +733,15 @@ def main() -> None:
     elif args.cmd == "proxy-validation":
         result = run_proxy_validation(args.model, n_problems=args.n_problems, domain=args.domain)
         print(json.dumps({k: v for k, v in result.items()}, indent=2))
+    elif args.cmd == "pilot-validation":
+        run_pilot_validation(
+            args.model,
+            domain=args.domain,
+            pilot_bits=tuple(args.pilot_bits),
+            n_confirmation_problems=args.n_problems,
+            num_fewshot=args.num_fewshot,
+            sensitivity_path=args.out,
+        )
     elif args.cmd == "run":
         run_sweep(args.model, args.domains, args.out, args.group_size, checkpoint_path=args.checkpoint)
 
