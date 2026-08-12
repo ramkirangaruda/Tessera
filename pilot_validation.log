@@ -281,3 +281,41 @@ uniform_hi_metric=0.3500
   "margin": -0.24999999999999997,
   "verdict": "STOP \u2014 do not launch full sweep"
 }
+=== relaunch Tue Aug 11 22:12:58 IST 2026 ===
+resuming confirmation phase: ['baseline_metric', 'uniform_metric', 'uniform_hi_metric'] already done
+=== noise floor pre-flight: math ===
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:01<06:25,  1.24s/it]Loading weights:   1%|          | 2/311 [00:01<02:58,  1.73it/s]Loading weights:  19%|#8        | 59/311 [00:01<00:03, 71.66it/s]Loading weights:  26%|##6       | 81/311 [00:01<00:03, 67.81it/s]Loading weights:  31%|###1      | 97/311 [00:01<00:02, 76.28it/s]Loading weights:  36%|###5      | 111/311 [00:02<00:02, 70.62it/s]Loading weights:  40%|###9      | 123/311 [00:02<00:02, 74.99it/s]Loading weights:  43%|####3     | 134/311 [00:02<00:02, 64.67it/s]Loading weights:  46%|####5     | 143/311 [00:02<00:02, 63.52it/s]Loading weights:  49%|####8     | 151/311 [00:02<00:02, 58.61it/s]Loading weights:  54%|#####4    | 169/311 [00:03<00:01, 74.23it/s]Loading weights:  58%|#####7    | 180/311 [00:03<00:01, 66.34it/s]Loading weights:  63%|######3   | 197/311 [00:03<00:01, 81.74it/s]Loading weights:  67%|######6   | 207/311 [00:03<00:01, 68.28it/s]Loading weights:  72%|#######2  | 224/311 [00:03<00:01, 81.15it/s]Loading weights:  76%|#######5  | 235/311 [00:03<00:00, 76.42it/s]Loading weights:  79%|#######9  | 246/311 [00:04<00:00, 73.22it/s]Loading weights:  83%|########2 | 257/311 [00:04<00:00, 66.30it/s]Loading weights:  86%|########6 | 268/311 [00:04<00:00, 73.02it/s]Loading weights:  92%|#########1| 285/311 [00:04<00:00, 93.35it/s]Loading weights:  95%|#########5| 296/311 [00:04<00:00, 81.01it/s]Loading weights: 100%|##########| 311/311 [00:04<00:00, 65.30it/s]
+C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (6.0.0.post1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (245943 > 131072). Running this sequence through the model will result in indexing errors
+{
+  "domain": "math",
+  "bits": 3,
+  "n_held_out": 120,
+  "baseline_ppl_full": 3.6808411918863184,
+  "determinism_delta": 0.0,
+  "repeat_tensor": "blk.13.mlp_down",
+  "repeat_delta_half_a": -0.03698784956618528,
+  "repeat_delta_half_b": -0.03926677916581056,
+  "split_half_noise_floor": 0.002278929599625279,
+  "insensitive_tensor": "blk.27.attn_k",
+  "insensitive_delta": -0.00573161754795537,
+  "verdict": "PASS"
+}
+=== pilot sweep: math, bits=(3, 6) ===
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<03:26,  1.50it/s]Loading weights:  19%|#8        | 59/311 [00:00<00:02, 100.77it/s]Loading weights:  29%|##8       | 89/311 [00:00<00:01, 120.79it/s]Loading weights:  36%|###6      | 113/311 [00:01<00:01, 107.13it/s]Loading weights:  42%|####2     | 131/311 [00:01<00:01, 104.40it/s]Loading weights:  47%|####6     | 146/311 [00:01<00:01, 89.93it/s] Loading weights:  51%|#####     | 158/311 [00:02<00:02, 64.60it/s]Loading weights:  58%|#####7    | 180/311 [00:02<00:01, 80.83it/s]Loading weights:  61%|######1   | 191/311 [00:02<00:01, 76.87it/s]Loading weights:  65%|######4   | 201/311 [00:02<00:01, 66.86it/s]Loading weights:  67%|######7   | 209/311 [00:02<00:01, 59.18it/s]Loading weights:  69%|######9   | 216/311 [00:02<00:01, 59.97it/s]Loading weights:  76%|#######5  | 235/311 [00:03<00:01, 56.82it/s]Loading weights:  79%|#######9  | 246/311 [00:03<00:01, 52.31it/s]Loading weights:  85%|########5 | 265/311 [00:03<00:00, 68.76it/s]Loading weights:  88%|########8 | 275/311 [00:03<00:00, 73.97it/s]Loading weights:  91%|#########1| 284/311 [00:03<00:00, 66.66it/s]Loading weights:  94%|#########3| 292/311 [00:04<00:00, 62.48it/s]Loading weights:  97%|#########6| 301/311 [00:04<00:00, 59.17it/s]Loading weights: 100%|##########| 311/311 [00:04<00:00, 72.44it/s]
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (245943 > 131072). Running this sequence through the model will result in indexing errors
+100/394 (math, 3-bit, blk.14.attn_q)
+200/394 (math, 6-bit, blk.0.attn_k)
+300/394 (math, 6-bit, blk.14.attn_o)
+loaded partial allocation: 110 tensors (110 complete-data tensors; 87 incomplete tensors left at fp16 in both variants)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<00:44,  7.04it/s]Loading weights:   1%|          | 2/311 [00:00<00:56,  5.42it/s]Loading weights:  37%|###6      | 114/311 [00:00<00:00, 324.27it/s]Loading weights:  50%|####9     | 154/311 [00:00<00:00, 241.46it/s]Loading weights:  59%|#####9    | 185/311 [00:00<00:00, 197.83it/s]Loading weights:  68%|######7   | 210/311 [00:01<00:00, 171.04it/s]Loading weights:  74%|#######4  | 231/311 [00:01<00:00, 107.53it/s]Loading weights:  79%|#######9  | 247/311 [00:01<00:00, 92.47it/s] Loading weights:  84%|########3 | 260/311 [00:02<00:00, 91.86it/s]Loading weights:  87%|########7 | 272/311 [00:02<00:00, 79.82it/s]Loading weights:  91%|######### | 282/311 [00:02<00:00, 73.42it/s]Loading weights:  94%|#########3| 291/311 [00:02<00:00, 58.83it/s]Loading weights:  97%|#########6| 301/311 [00:02<00:00, 54.15it/s]Loading weights: 100%|##########| 311/311 [00:03<00:00, 103.22it/s]
+C:\Users\ramki\AppData\Roaming\Python\Python312\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.7.0) or chardet (6.0.0.post1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+`pretrained` model kwarg is not of type `str`. Many other model arguments may be ignored. Please do not launch via accelerate or use `parallelize=True` if passing an existing model this way.
+Passed an already-initialized model through `pretrained`, assuming single-process call to evaluate() or custom distributed integration
+Overwriting default num_fewshot of gsm8k from 5 to 5
+  0%|          | 0/20 [00:00<?, ?it/s] 35%|###5      | 7/20 [00:00<00:00, 65.35it/s] 70%|#######   | 14/20 [00:00<00:00, 61.77it/s]100%|##########| 20/20 [00:00<00:00, 62.36it/s]
+Running generate_until requests:   0%|          | 0/20 [00:00<?, ?it/s]Running generate_until requests:   5%|5         | 1/20 [01:18<24:47, 78.29s/it]Running generate_until requests:  10%|#         | 2/20 [01:55<16:12, 54.04s/it]Running generate_until requests:  15%|#5        | 3/20 [03:05<17:26, 61.55s/it]Running generate_until requests:  20%|##        | 4/20 [04:20<17:49, 66.82s/it]Running generate_until requests:  25%|##5       | 5/20 [05:34<17:20, 69.39s/it]Running generate_until requests:  30%|###       | 6/20 [06:51<16:44, 71.78s/it]Running generate_until requests:  35%|###5      | 7/20 [07:38<13:47, 63.65s/it]Running generate_until requests:  40%|####      | 8/20 [08:20<11:21, 56.82s/it]Running generate_until requests:  45%|####5     | 9/20 [08:56<09:15, 50.47s/it]Running generate_until requests:  50%|#####     | 10/20 [09:44<08:15, 49.53s/it]Running generate_until requests:  55%|#####5    | 11/20 [10:33<07:24, 49.43s/it]Running generate_until requests:  60%|######    | 12/20 [11:44<07:28, 56.06s/it]Running generate_until requests:  65%|######5   | 13/20 [12:16<05:40, 48.62s/it]Running generate_until requests:  70%|#######   | 14/20 [13:28<05:34, 55.69s/it]

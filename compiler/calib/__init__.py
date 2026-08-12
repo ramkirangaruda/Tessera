@@ -24,7 +24,7 @@ files instead of the Hub without touching sweep.py.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 N_CALIB_SAMPLES = 128
 CALIB_SEQ_LEN = 2048
@@ -110,13 +110,55 @@ def load_calibration_set(domain: str, tokenizer, n_samples: int = N_CALIB_SAMPLE
     return samples
 
 
+def _concat_and_chunk(
+    texts: List[str], tokenizer, seq_len: int = CALIB_SEQ_LEN, n_chunks: int = N_CALIB_SAMPLES,
+    min_chunks: int = 20,
+):
+    """Concatenate `texts` and chunk into non-overlapping `seq_len`-token windows (the standard
+    GPTQ/AWQ/wikitext-ppl convention) instead of tokenizing each text independently and truncating
+    to `seq_len`. Independent short samples (spec §4.1 post-mortem: GSM8K math domain, 128
+    examples averaging ~60 tokens each -> 7,732 total tokens) give a held-out perplexity signal
+    dominated by per-sample variance rather than true quantization damage — confirmed directly on
+    the live model: a real, restore-verified ~21% weight perturbation from 3-bit fake-quantization
+    *lowered* measured perplexity on that set (delta_ppl=-0.78), which caused the M2 allocator's
+    knapsack to chase noise (81/197 pilot-swept tensors showed damage decreasing at lower bit
+    depth). Concatenating first amortizes single-sample noise across `n_chunks * seq_len` tokens
+    of contiguous signal instead of `n_chunks` independent short ones.
+
+    Returns fewer than `n_chunks` chunks if the source text is too short to fill them (e.g. GSM8K
+    test split only yields ~120 2048-token chunks, not 128) rather than padding or truncating
+    seq_len — raises if it can't even reach `min_chunks`, since that's too small a held-out set to
+    trust regardless of the concatenation fix.
+    """
+    text = "\n\n".join(t for t in texts if t.strip())
+    ids = tokenizer(text, return_tensors="pt")["input_ids"][0]
+
+    chunks = []
+    for start in range(0, ids.shape[0] - seq_len, seq_len):
+        chunks.append(ids[start : start + seq_len].unsqueeze(0))
+        if len(chunks) >= n_chunks:
+            break
+    if len(chunks) < min_chunks:
+        raise RuntimeError(
+            f"only {len(chunks)} {seq_len}-token chunks available from {len(texts)} source "
+            f"texts ({ids.shape[0]} tokens total) — need at least {min_chunks} for a trustworthy "
+            f"held-out ppl set; pass more source texts or a smaller seq_len."
+        )
+    return chunks
+
+
 def load_domain_held_out_ppl_set(
     domain: str, tokenizer, n_samples: int = N_CALIB_SAMPLES, seq_len: int = CALIB_SEQ_LEN
 ):
     """Domain-specific held-out text for the sweep's perplexity metric (spec §4.1 amendment) —
     disjoint from `load_calibration_set`'s source for the same domain, per the module docstring
     table. `chat` reuses `load_wikitext2_eval` directly (same set as the M0 baseline, per the
-    spec's original chat<->WikiText-2 pairing)."""
+    spec's original chat<->WikiText-2 pairing).
+
+    All domains now use `_concat_and_chunk` (spec §4.1 post-mortem amendment) — concatenate the
+    domain's held-out text and slice into contiguous `seq_len`-token windows, rather than
+    tokenizing+truncating each example independently. See `_concat_and_chunk`'s docstring for why
+    (the math-domain pilot sweep's near-random allocator was traced to this)."""
     if domain == "chat":
         return load_wikitext2_eval(tokenizer, seq_len=seq_len, n_chunks=n_samples)
 
@@ -125,26 +167,32 @@ def load_domain_held_out_ppl_set(
     if domain == "code":
         name, config = _DATASET_BY_DOMAIN["code"]
         ds = load_dataset(name, config, split="train", streaming=True).skip(n_samples)
+        # A skip(n_samples) source-example budget was tuned for "n_samples independent files
+        # truncated to seq_len"; concatenation needs more raw text to fill the same n_chunks *
+        # seq_len tokens, so pull a larger pool of files (dominant cost is trivial, streamed text).
+        n_source = n_samples * 8
     elif domain == "math":
         ds = load_dataset("openai/gsm8k", "main", split="test", streaming=True)
+        n_source = 10_000  # exhausts the ~1,319-example test split; _concat_and_chunk caps chunks
     elif domain == "summ":
         ds = load_dataset("abisee/cnn_dailymail", "3.0.0", split="validation", streaming=True)
+        n_source = n_samples * 2
     else:
         raise ValueError(f"unknown domain: {domain!r}")
 
     texts: List[str] = []
     for example in ds:
         text = example.get("text") or example.get("content") or example.get("article") or example.get("question") or str(example)
+        if domain == "math":
+            # GSM8K's signal is split across question + answer; question alone is ~15-25 tokens.
+            answer = example.get("answer", "")
+            text = f"{text}\n{answer}" if answer else text
         if len(text.strip()) > 0:
             texts.append(text)
-        if len(texts) >= n_samples:
+        if len(texts) >= n_source:
             break
 
-    samples = []
-    for text in texts:
-        ids = tokenizer(text, truncation=True, max_length=seq_len, return_tensors="pt")["input_ids"]
-        samples.append(ids)
-    return samples
+    return _concat_and_chunk(texts, tokenizer, seq_len=seq_len, n_chunks=n_samples)
 
 
 def load_wikitext2_eval(tokenizer, seq_len: int = CALIB_SEQ_LEN, n_chunks: int = N_CALIB_SAMPLES):
@@ -160,29 +208,66 @@ def load_wikitext2_eval(tokenizer, seq_len: int = CALIB_SEQ_LEN, n_chunks: int =
     # the current canonical rehost of the same data under the same config names.
     ds = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")
     text = "\n\n".join(t for t in ds["text"] if t.strip())
-    ids = tokenizer(text, return_tensors="pt")["input_ids"][0]
-
-    chunks = []
-    for start in range(0, ids.shape[0] - seq_len, seq_len):
-        chunks.append(ids[start : start + seq_len].unsqueeze(0))
-        if len(chunks) >= n_chunks:
-            break
-    return chunks
+    return _concat_and_chunk(texts=[text], tokenizer=tokenizer, seq_len=seq_len, n_chunks=n_chunks)
 
 
-def perplexity(model, calib_samples) -> float:
+def perplexity(model, calib_samples, chunk_size: Optional[int] = 256) -> float:
+    """Perplexity via sequence-chunked lm_head + cross-entropy (spec §4.1 perf amendment).
+
+    The naive `model(ids, labels=ids)` call materializes a full-sequence logits tensor —
+    [seq_len, vocab_size] = [2048, 151936] for Qwen3, ~622MB in fp16 — and `F.cross_entropy`
+    internally upcasts it to fp32 for `log_softmax`, pushing that alone to ~1.9GB. Measured on
+    this repo's 8GB card: that's most of a 6.81GB peak VRAM per forward pass, which pushed
+    every sweep evaluation into Windows' WDDM sysmem-fallback spillover (PyTorch reported
+    12.7GB "allocated" against a 7.96GB physical card at batch=2 — memory silently paged over
+    PCIe instead of erroring) and was the actual ~100x sweep slowdown, not sequence length or
+    batch size.
+
+    Fix: run the transformer body once to get hidden states ([seq_len, hidden_size] — a few MB,
+    negligible), then apply `lm_head` + cross-entropy in `chunk_size`-token slices along the
+    sequence axis, accumulating summed negative log-likelihood and never materializing more than
+    one chunk's logits at a time. This is the same per-token log-likelihoods as the unchunked
+    computation, just summed in a different order — mathematically identical perplexity, not an
+    approximation. Verified against the unchunked computation to within 1e-4 relative ppl before
+    replacing it as the default (see the verification run in the commit introducing this).
+
+    `chunk_size=None` reproduces the original unchunked `model(ids, labels=ids)` call byte-for-
+    byte (not just numerically close) — used to resume the in-flight pilot sweep at its original
+    settings so its 307 already-checkpointed evaluations stay comparable to the remainder,
+    without depending on the chunked path's <1e-4 tolerance holding for that specific run.
+    """
     import math
 
     import torch
+
+    if chunk_size is None:
+        total_nll = 0.0
+        total_tokens = 0
+        with torch.no_grad():
+            for ids in calib_samples:
+                out = model(ids, labels=ids)
+                n = ids.shape[1] - 1
+                total_nll += out.loss.item() * n
+                total_tokens += n
+        return math.exp(total_nll / max(total_tokens, 1))
+
+    import torch.nn.functional as F
+
+    base_model = model.model if hasattr(model, "model") else model.transformer
 
     total_nll = 0.0
     total_tokens = 0
     with torch.no_grad():
         for ids in calib_samples:
-            out = model(ids, labels=ids)
-            n = ids.shape[1] - 1
-            total_nll += out.loss.item() * n
-            total_tokens += n
+            hidden = base_model(ids, use_cache=False)[0]  # [1, seq_len, hidden_size]
+            seq_len = ids.shape[1]
+            for start in range(0, seq_len - 1, chunk_size):  # seq_len-1: last position has no target
+                end = min(start + chunk_size, seq_len - 1)
+                logits_chunk = model.lm_head(hidden[:, start:end, :]).float()
+                targets = ids[:, start + 1 : end + 1]
+                loss = F.cross_entropy(logits_chunk.squeeze(0), targets.squeeze(0), reduction="sum")
+                total_nll += loss.item()
+                total_tokens += end - start
     return math.exp(total_nll / max(total_tokens, 1))
 
 

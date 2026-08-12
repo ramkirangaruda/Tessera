@@ -55,6 +55,55 @@ artifact, with the session traveling on hardware.
 - **"This is a lot of infrastructure for a hackathon."** It is — that's why the repo was built
   ahead of the event; the event is the demo, not the build window (spec header).
 
+## Result-contingent framing (spec §4.2 amendment) — pick at verdict time, don't scramble
+
+The pilot-validation gate (spec §4.1/§4.2, `compiler/sweep.py pilot-validation`) tests whether
+task-conditioned allocation actually beats uniform quantization at equal-or-fewer bytes, on real
+GSM8K numbers, not synthetic ones. Both outcomes are real findings — draft both now so picking
+between them at 2am is a copy-paste, not a scramble.
+
+### If it wins: lead with the margin
+
+Open claim 3 (task-conditioned allocation) with the number directly: "the allocator's own choices
+beat naive uniform quantization by *N* points on GSM8K, at fewer-or-equal bytes — not on paper,
+measured." Show the byte-for-byte comparison table (smart bytes vs. uniform-hi bytes, smart metric
+vs. uniform-hi metric) as the receipt, the same way claim 3 currently points to the correlation
+matrix. This is the strongest version of the pitch — task-conditioning stops being a plausible
+mechanism and becomes a demonstrated result. Everything else in this doc (claims 1, 2, 4) stands
+unchanged.
+
+### If it loses or ties: reframe, don't hide it
+
+Say the number. "We measured task-conditioned allocation against uniform quantization at equal
+bytes and it didn't win — here's the margin" is a more credible sentence in front of judges than a
+pitch that quietly drops claim 3. Judges who ask will ask *because* the claims list has four items
+and only three get airtime; better to name the fourth and say why up front. Reframe pitch order
+around what *did* hold up:
+
+1. **Lead with claim 4 (portable, residue-free session)** — the least contingent claim, and the
+   one the demo's middle act (unplug → wipe → resume) proves regardless of the allocator's
+   verdict. This becomes the opening, not the closer.
+2. **Claim 1, storage-consolidation framing, unchanged** — one 1.7 GB `.tsra` artifact collapsing
+   what a community GGUF repo ships as 24 separate files is true independent of whether the
+   *contents* of the allocation are smarter than uniform. Say so plainly: "one file, every
+   precision, materializes in under two seconds" doesn't depend on claim 3 at all.
+3. **Claim 2 (device-conditioned budget) stands on its own** — solving against a device's actual
+   free memory at load time is a real, working mechanism whether or not the *per-tensor* choice
+   inside that budget beats uniform. Keep it, drop the implication that it's smarter than uniform,
+   keep the implication that it's *automatic and correct for the device in front of you*.
+4. **Claim 3 becomes "a rigorously measured negative result," not an erased one.** Name the
+   number, name the method (pilot sweep vs. uniform, equal-or-fewer bytes, real GSM8K, not a
+   per-tensor correlation proxy), and say what it rules out: task-conditioned allocation, on this
+   model/domain/budget, does not currently beat naive uniform quantization. That is a defensible,
+   even respectable, thing to have measured carefully and be willing to say — the alternative
+   (silently dropping it or fudging the framing) is the actual credibility risk, not the null
+   result itself.
+
+Closing beat becomes: "We built a nested, single-artifact quantization format with a portable,
+residue-free session, running on real constrained hardware — and we tested our most ambitious
+claim honestly enough to tell you it didn't hold up yet." That is a stronger closing line for a
+technical audience than a Pareto plot with an asterisk.
+
 ## Closing beat
 
 The Pareto plot: every Tessera profile sitting above the uniform-quantization baseline curve.

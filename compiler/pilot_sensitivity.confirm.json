@@ -1,6 +1,20 @@
 {
   "baseline_metric": 0.45,
-  "smart_metric": 0.1,
   "uniform_metric": 0.0,
-  "uniform_hi_metric": 0.35
+  "uniform_hi_metric": 0.35,
+  "noise_floor_verdict": "PASS",
+  "noise_floor_detail": {
+    "domain": "math",
+    "bits": 3,
+    "n_held_out": 120,
+    "baseline_ppl_full": 3.6808411918863184,
+    "determinism_delta": 0.0,
+    "repeat_tensor": "blk.13.mlp_down",
+    "repeat_delta_half_a": -0.03698784956618528,
+    "repeat_delta_half_b": -0.03926677916581056,
+    "split_half_noise_floor": 0.002278929599625279,
+    "insensitive_tensor": "blk.27.attn_k",
+    "insensitive_delta": -0.00573161754795537,
+    "verdict": "PASS"
+  }
 }

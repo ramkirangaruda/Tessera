@@ -87,6 +87,71 @@ def select_stratified_tensor_sample() -> List[str]:
     return names  # 1 + 7*2 = 15
 
 
+def select_stratified_validation_subset(
+    ranking: Dict[str, float], n: int = 20, middle_oversample: float = 0.5, seed: int = 0
+) -> List[str]:
+    """Validation-subset selection for the width-reduction interpolation design (spec §4.1
+    amendment). `ranking` maps tensor_name -> a cheap single-width damage score (the design's
+    step-1 ranking pass). Splits tensors into low/middle/high terciles by that score and
+    over-samples the middle band — interpolation error there is what actually flips a knapsack
+    bit-width decision; the extremes (obviously-robust or obviously-critical tensors) are
+    unambiguous regardless of how good the interpolation is, so spending validation budget on
+    them teaches us little. `middle_oversample` is the target fraction of `n` drawn from the
+    middle tercile (default 0.5, vs. an even 1/3 split three ways). Deterministic (seeded), not
+    re-randomized per run, so repeated sweeps validate against the same tensors."""
+    import random
+
+    names_sorted = sorted(ranking, key=lambda k: ranking[k])
+    n_total = len(names_sorted)
+    lo_end = n_total // 3
+    hi_start = 2 * n_total // 3
+    low_band = names_sorted[:lo_end]
+    mid_band = names_sorted[lo_end:hi_start]
+    high_band = names_sorted[hi_start:]
+
+    n_mid = round(n * middle_oversample)
+    n_extremes = n - n_mid
+    n_low = n_extremes // 2
+    n_high = n_extremes - n_low
+
+    rng = random.Random(seed)
+    picked = (
+        rng.sample(low_band, min(n_low, len(low_band)))
+        + rng.sample(mid_band, min(n_mid, len(mid_band)))
+        + rng.sample(high_band, min(n_high, len(high_band)))
+    )
+    return picked
+
+
+def check_monotonicity(tensors: Dict[str, "TensorOptions"]) -> dict:
+    """Measurement-quality pre-flight (spec §4.1 width-reduction amendment): fake-quant damage
+    must be non-increasing as bit-width increases — more bits should never measure as *more*
+    damaging. Violations get flagged as noise-dominated measurements, not silently smoothed over
+    by an interpolation fit; the violation count/rate is a direct, visible read on how much to
+    trust interpolating between measured widths for a given tensor set. Applied to the 307
+    already-completed math-domain pilot evals (2-width case, 3-bit vs 6-bit only): 48/110 tensors
+    with both widths measured (43.6%) violate strict monotonicity — a real, non-trivial rate that
+    argues for caution rather than blind curve-fitting, though most violation magnitudes (median
+    ~0.0098) are small relative to non-violating gaps (median ~0.0198) and only modestly above
+    the measured split-half noise floor (~0.0023)."""
+    violations: Dict[str, list] = {}
+    for name, options in tensors.items():
+        widths = sorted(options)
+        for w_lo, w_hi in zip(widths, widths[1:]):
+            damage_lo = options[w_lo][0]
+            damage_hi = options[w_hi][0]
+            if damage_hi > damage_lo:
+                violations.setdefault(name, []).append(
+                    {"bits_lo": w_lo, "bits_hi": w_hi, "excess_damage": damage_hi - damage_lo}
+                )
+    return {
+        "n_tensors_checked": len(tensors),
+        "n_tensors_with_violation": len(violations),
+        "violation_rate": len(violations) / max(len(tensors), 1),
+        "violations": violations,
+    }
+
+
 def fake_quantize_tensor(w: np.ndarray, bits: int, group_size: int = 128) -> np.ndarray:
     """Quantize -> dequantize `w` in place at `bits`, matching format/bitplane.py's derived-scale
     reconstruction exactly, so sensitivity numbers reflect what the .tsra loader will actually
@@ -243,6 +308,7 @@ def run_noise_floor_check(
     insensitive_tensor: str = "blk.27.attn_k",
     bits: int = PROXY_VALIDATION_BITS,
     device: Optional[str] = None,
+    ppl_chunk_size: Optional[int] = 256,
 ) -> dict:
     """Pre-flight check 3 (spec §4.1). Two complementary measurements:
 
@@ -277,9 +343,9 @@ def run_noise_floor_check(
     half_a, half_b = held_out[:mid], held_out[mid:]
 
     state = dict(model.named_parameters())
-    baseline_full = perplexity(model, held_out)
-    baseline_a = perplexity(model, half_a)
-    baseline_b = perplexity(model, half_b)
+    baseline_full = perplexity(model, held_out, chunk_size=ppl_chunk_size)
+    baseline_a = perplexity(model, half_a, chunk_size=ppl_chunk_size)
+    baseline_b = perplexity(model, half_b, chunk_size=ppl_chunk_size)
 
     # quantize repeat_tensor once; take all measurements against it before restoring
     param = get_param(state, repeat_tensor)
@@ -288,10 +354,10 @@ def run_noise_floor_check(
     with torch.no_grad():
         param.copy_(torch.from_numpy(w_hat).to(original.dtype))
 
-    ppl_full_1 = perplexity(model, held_out)
-    ppl_full_2 = perplexity(model, held_out)  # identical-data repeat -> determinism check
-    ppl_a = perplexity(model, half_a)
-    ppl_b = perplexity(model, half_b)
+    ppl_full_1 = perplexity(model, held_out, chunk_size=ppl_chunk_size)
+    ppl_full_2 = perplexity(model, held_out, chunk_size=ppl_chunk_size)  # identical-data repeat -> determinism check
+    ppl_a = perplexity(model, half_a, chunk_size=ppl_chunk_size)
+    ppl_b = perplexity(model, half_b, chunk_size=ppl_chunk_size)
     restore_and_assert(param, original)
 
     determinism_delta = abs(ppl_full_1 - ppl_full_2)
@@ -305,7 +371,7 @@ def run_noise_floor_check(
     w_hat2 = fake_quantize_tensor(original2.float().cpu().numpy(), bits, group_size)
     with torch.no_grad():
         param2.copy_(torch.from_numpy(w_hat2).to(original2.dtype))
-    ppl_insensitive = perplexity(model, held_out)
+    ppl_insensitive = perplexity(model, held_out, chunk_size=ppl_chunk_size)
     restore_and_assert(param2, original2)
     insensitive_delta = ppl_insensitive - baseline_full
 
@@ -484,6 +550,7 @@ def run_sweep(
     n_held_out_samples: int = 128,
     device: Optional[str] = None,
     bit_choices: Iterable[int] = BIT_CHOICES,
+    ppl_chunk_size: Optional[int] = 256,
 ) -> None:
     """Full sweep against a real model + held-out sets. Stratified width-major/domain-major
     order (spec §4.1 pre-flight check 4): outer loops are (domain, bits), inner loop is over
@@ -494,7 +561,15 @@ def run_sweep(
     validation (spec §4.1 amendment, replacing the per-tensor proxy-validation gate) calls this
     with `bit_choices=(3, 6)` and a single domain: 197 tensors x 2 widths x 1 domain = 394
     evaluations, ~8% of the full sweep, enough for the allocator to make a real choice between
-    two widths per tensor without paying for the complete grid."""
+    two widths per tensor without paying for the complete grid.
+
+    `ppl_chunk_size` is forwarded to `compiler.calib.perplexity` (spec §4.1 perf amendment —
+    chunked lm_head/cross-entropy avoids materializing full-sequence logits, fixing the VRAM
+    spillover that made the original math-domain pilot sweep ~100x slower than expected).
+    Defaults to the new chunked path (256); pass `None` to reproduce the original unchunked
+    computation byte-for-byte — required when resuming a sweep that has already-checkpointed
+    evaluations from before this fix, so old and new rows stay numerically comparable rather
+    than merely within the <1e-4 tolerance the chunked path was verified against."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -538,7 +613,7 @@ def run_sweep(
     done = 0
     for domain in domains:
         held_out = [ids.to(device) for ids in load_domain_held_out_ppl_set(domain, tok, n_samples=n_held_out_samples, seq_len=seq_len)]
-        baseline_ppl = perplexity(model, held_out)
+        baseline_ppl = perplexity(model, held_out, chunk_size=ppl_chunk_size)
 
         for bits in bit_choices:
             for tensor_name in tensor_names:
@@ -554,7 +629,7 @@ def run_sweep(
                 with torch.no_grad():
                     param.copy_(torch.from_numpy(w_hat).to(original.dtype))
 
-                ppl = perplexity(model, held_out)
+                ppl = perplexity(model, held_out, chunk_size=ppl_chunk_size)
 
                 restore_and_assert(param, original)  # pre-flight check 1, every iteration
 
@@ -585,6 +660,7 @@ def run_pilot_validation(
     num_fewshot: int = 5,
     sensitivity_path: str = "compiler/pilot_sensitivity.parquet",
     device: Optional[str] = None,
+    ppl_chunk_size: Optional[int] = 256,
 ) -> dict:
     """Pilot sweep validation (spec §4.1 amendment) — replaces the per-tensor proxy-validation
     correlation gate. That gate measured Spearman rho over only 15 tensors; at n=15 the 95% CI
@@ -648,8 +724,33 @@ def run_pilot_validation(
         confirmed[key] = value
         Path(confirm_checkpoint_path).write_text(json.dumps(confirmed, indent=2))
 
+    # Mandatory pre-flight (spec §4.1 post-mortem amendment): run_noise_floor_check defaults to
+    # domain="chat" and was never invoked against "math" before the first pilot sweep, which is
+    # exactly the domain whose held-out set (independent ~60-token GSM8K samples) turned out to
+    # be too small to resolve real per-tensor signal from noise — traced after the fact to a
+    # knapsack allocation that lost to uniform quantization at equal-or-fewer bytes. Check
+    # *this* domain's noise floor before spending a multi-hour sweep on it again.
+    if "noise_floor_verdict" in confirmed:
+        print(f"noise floor ({domain}): {confirmed['noise_floor_verdict']} (from checkpoint)", flush=True)
+        if confirmed["noise_floor_verdict"] != "PASS":
+            raise RuntimeError(f"noise floor check for domain={domain!r} did not pass (checkpointed result): {confirmed}")
+    else:
+        print(f"=== noise floor pre-flight: {domain} ===", flush=True)
+        nf_result = run_noise_floor_check(model_name, domain=domain, group_size=group_size, device=device)
+        print(json.dumps(nf_result, indent=2), flush=True)
+        _cleanup()
+        confirmed["noise_floor_verdict"] = nf_result["verdict"]
+        confirmed["noise_floor_detail"] = nf_result
+        Path(confirm_checkpoint_path).write_text(json.dumps(confirmed, indent=2))
+        if nf_result["verdict"] != "PASS":
+            raise RuntimeError(
+                f"noise floor check for domain={domain!r} did not pass: {nf_result} — held-out "
+                f"set is too small/noisy to trust a sensitivity sweep on this domain. Stop and "
+                f"report per spec §4.1, do not proceed to the pilot sweep."
+            )
+
     print(f"=== pilot sweep: {domain}, bits={pilot_bits} ===", flush=True)
-    run_sweep(model_name, [domain], sensitivity_path, group_size=group_size, bit_choices=pilot_bits, device=device)
+    run_sweep(model_name, [domain], sensitivity_path, group_size=group_size, bit_choices=pilot_bits, device=device, ppl_chunk_size=ppl_chunk_size)
 
     tensors = load_sensitivity(sensitivity_path, domain)
     bytes_lo = total_bytes_of(tensors, {n: min(pilot_bits) for n in tensors})
@@ -795,6 +896,10 @@ def main() -> None:
     pl.add_argument("--n-problems", type=int, default=20)
     pl.add_argument("--num-fewshot", type=int, default=5)
     pl.add_argument("--out", default="compiler/pilot_sensitivity.parquet")
+    pl.add_argument("--ppl-chunk-size", type=int, default=256,
+                     help="0 = unchunked (original, slower) perplexity path, for resuming a run "
+                          "checkpointed before the chunked-loss perf fix so old/new rows stay "
+                          "numerically comparable")
 
     run = sub.add_parser("run", help="the full 4,728-evaluation sweep")
     run.add_argument("--model", default="Qwen/Qwen3-1.7B")
@@ -802,6 +907,7 @@ def main() -> None:
     run.add_argument("--out", default="compiler/sensitivity.parquet")
     run.add_argument("--group-size", type=int, default=128)
     run.add_argument("--checkpoint", default=None)
+    run.add_argument("--ppl-chunk-size", type=int, default=256, help="0 = unchunked perplexity path")
 
     args = ap.parse_args()
     if args.cmd == "noise-floor":
@@ -818,9 +924,11 @@ def main() -> None:
             n_confirmation_problems=args.n_problems,
             num_fewshot=args.num_fewshot,
             sensitivity_path=args.out,
+            ppl_chunk_size=(args.ppl_chunk_size or None),
         )
     elif args.cmd == "run":
-        run_sweep(args.model, args.domains, args.out, args.group_size, checkpoint_path=args.checkpoint)
+        run_sweep(args.model, args.domains, args.out, args.group_size, checkpoint_path=args.checkpoint,
+                   ppl_chunk_size=(args.ppl_chunk_size or None))
 
 
 if __name__ == "__main__":
