@@ -1,0 +1,72 @@
+{
+  "n_tensors": 110,
+  "budgets_scanned": [
+    613523456,
+    628692992,
+    643862528,
+    659032064,
+    674201600,
+    689371136,
+    704540672,
+    719710208,
+    734879744
+  ],
+  "flip_tensors": [
+    "blk.0.mlp_down",
+    "blk.0.mlp_up",
+    "blk.12.attn_q",
+    "blk.15.attn_q",
+    "blk.3.mlp_up",
+    "blk.9.attn_q",
+    "blk.9.mlp_up"
+  ],
+  "n_flips": 7,
+  "bottom_quartile_by_gap": [
+    "blk.0.attn_k",
+    "blk.0.attn_o",
+    "blk.0.mlp_down",
+    "blk.1.attn_k",
+    "blk.1.attn_q",
+    "blk.1.mlp_down",
+    "blk.10.mlp_down",
+    "blk.12.attn_q",
+    "blk.14.attn_o",
+    "blk.15.attn_k",
+    "blk.15.attn_q",
+    "blk.2.attn_k",
+    "blk.2.attn_v",
+    "blk.2.mlp_gate",
+    "blk.3.attn_v",
+    "blk.4.mlp_down",
+    "blk.4.mlp_gate",
+    "blk.5.attn_o",
+    "blk.5.attn_q",
+    "blk.6.attn_k",
+    "blk.6.attn_q",
+    "blk.6.mlp_down",
+    "blk.7.attn_q",
+    "blk.7.attn_v",
+    "blk.8.mlp_down",
+    "blk.9.attn_q",
+    "blk.9.mlp_down"
+  ],
+  "overlap_count": 4,
+  "gap_deciles": {
+    "0": 0.00040642948368718734,
+    "10": 0.0023915626896301666,
+    "20": 0.003644551883814096,
+    "30": 0.006326101275990402,
+    "40": 0.009856715871397182,
+    "50": 0.013831268513884165,
+    "60": 0.021979112788058495,
+    "70": 0.03160448167733402,
+    "80": 0.038649822819082406,
+    "90": 0.07221770787996597,
+    "100": 10.416456056133793
+  },
+  "flip_kind_counts": {
+    "mlp_up": 3,
+    "attn_q": 3,
+    "mlp_down": 1
+  }
+}

@@ -125,7 +125,26 @@ def load_sensitivity(parquet_path: str, domain: str) -> Dict[str, TensorOptions]
     """Build the {tensor: {bits: (damage, bytes)}} structure for one domain from
     compiler/sweep.py's `sensitivity.parquet` output (columns: tensor_name, domain, bits,
     delta_ppl, bytes_at_bits, bytes_saved_vs_fp16 — spec §4.1 amendment: task metrics are no
-    longer per-row, see eval/harness.py's confirmation-metric step instead)."""
+    longer per-row, see eval/harness.py's confirmation-metric step instead).
+
+    Damage is clamped to >= 0 (spec §4.2 amendment, post-mortem on the math-domain pilot):
+    negative delta_ppl means fake-quantizing a tensor measured as *lowering* held-out
+    perplexity relative to fp16. Confirmed via a real GSM8K generalization check that at least
+    two such tensors (blk.5.attn_v, blk.13.attn_k) do NOT actually preserve quality when
+    crushed to 3-bit on this signal — task accuracy dropped from 0.45 to 0.25 despite
+    perplexity reporting an improvement. The quantizer itself is not buggy (reconstruction MSE
+    is strictly monotonic in bit-width, verified directly); this is perplexity failing as a
+    proxy for these tensors, not a measurement artifact fixable by more data.
+
+    LIMITATION, read before trusting this clamp: it only blocks NEGATIVE damage from being
+    treated as a reward. It does nothing for a tensor whose true task cost is severe but whose
+    measured delta_ppl is small-but-positive (e.g. 0.001) — that tensor still reads as "nearly
+    free" to the knapsack and gets crushed, because Test 2 showed perplexity can be wrong about
+    *magnitude*, not just sign, and this clamp cannot detect that case at all. This prevents the
+    one pathological failure mode caught so far; it does not establish that perplexity is a
+    trustworthy proxy in general. See the proxy-validation-v2 study (compiler/sweep.py) for the
+    scope question this clamp does not answer.
+    """
     import pandas as pd
 
     df = pd.read_parquet(parquet_path)
@@ -133,7 +152,7 @@ def load_sensitivity(parquet_path: str, domain: str) -> Dict[str, TensorOptions]
     tensors: Dict[str, TensorOptions] = {}
     for name, group in df.groupby("tensor_name"):
         tensors[name] = {
-            int(row.bits): (float(row.delta_ppl), int(row.bytes_at_bits))
+            int(row.bits): (max(0.0, float(row.delta_ppl)), int(row.bytes_at_bits))
             for row in group.itertuples()
         }
     return tensors
